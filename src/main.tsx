@@ -10,6 +10,7 @@ import Loader from './components/loader/loader.tsx';
 import { AuthProvider } from './screens/Auth/AuthContext.tsx';
 import ProtectedRoute from './screens/Auth/ProtectedRoute.tsx';
 import { ThemeProvider } from './components/theme-provider.tsx';
+import { OperationProgressOverlay } from './components/admin/OperationProgressOverlay.tsx';
 
 const Page1 = lazy(() =>
   wait(1300).then(() => import("./screens/page1.tsx"))
@@ -184,6 +185,7 @@ function wait(time: number) {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+      <OperationProgressOverlay />
       <AuthProvider>
         <RouterProvider router={router} />
       </AuthProvider>

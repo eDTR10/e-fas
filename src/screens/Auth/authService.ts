@@ -1,4 +1,10 @@
 import axios from "axios";
+import {
+  finishTrackedOperation,
+  getTrackedOperationLabel,
+  OperationTrackedConfig,
+  startTrackedOperation,
+} from "../../lib/operationProgress";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const API_PREFIX = "/api/v1";
@@ -17,13 +23,21 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Token ${token}`;
   }
+  const operationLabel = getTrackedOperationLabel(config);
+  if (operationLabel) {
+    startTrackedOperation(config as OperationTrackedConfig, operationLabel);
+  }
   return config;
 });
 
 // Token rejected/expired server-side — clear it and bounce to login
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    finishTrackedOperation(response.config as OperationTrackedConfig);
+    return response;
+  },
   (error) => {
+    finishTrackedOperation(error.config as OperationTrackedConfig | undefined);
     if (error.response?.status === 401) {
       localStorage.removeItem("auth_token");
       if (window.location.pathname !== LOGIN_URL) {

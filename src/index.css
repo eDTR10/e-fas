@@ -89,3 +89,75 @@
   }
 }
 
+@keyframes efas-operation-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(140%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+
+.efas-operation-progress-bar {
+  animation: efas-operation-progress 1.35s ease-in-out infinite;
+}
+
+/* SweetAlert is used throughout the admin area. Keep its actions readable
+   and visually consistent in both themes, including when it opens above a
+   Radix dialog. */
+.swal2-container {
+  z-index: 11000 !important;
+  padding: 1rem !important;
+}
+
+.swal2-popup {
+  width: min(30rem, calc(100vw - 2rem)) !important;
+  padding: 1.5rem !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 1rem !important;
+  background: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+  box-shadow: 0 24px 60px rgb(15 23 42 / 0.28) !important;
+}
+
+.swal2-title,
+.swal2-html-container {
+  color: hsl(var(--foreground)) !important;
+}
+
+.swal2-actions {
+  display: flex !important;
+  gap: 0.75rem !important;
+  margin-top: 1.5rem !important;
+}
+
+.swal2-styled {
+  min-width: 6.5rem !important;
+  min-height: 2.5rem !important;
+  margin: 0 !important;
+  border-radius: 0.6rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+}
+
+.swal2-confirm {
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.swal2-cancel {
+  border: 1px solid hsl(var(--border)) !important;
+  background: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.swal2-styled:focus-visible {
+  outline: 2px solid hsl(var(--ring)) !important;
+  outline-offset: 2px !important;
+}
+

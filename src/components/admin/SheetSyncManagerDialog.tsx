@@ -1,14 +1,35 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, RefreshCw, Link2 } from "lucide-react";
-import Swal from "sweetalert2";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Link2,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "../ui/dialog";
 import { sheetSyncApi, SheetSyncSource, SyncTable } from "../../lib/sheetSyncApi";
 
-const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
+interface SyncSummary {
+  hasIssues: boolean;
+  counts: string[];
+  failedSources: {
+    id: number;
+    label: string;
+    url: string;
+    error: string | null;
+  }[];
+  warningCount: number;
+}
 
 function extractError(err: unknown): string {
   const error = err as {
@@ -23,22 +44,25 @@ function extractError(err: unknown): string {
       : error?.message || "The sync request failed before the server responded.";
   }
   if (typeof data === "string") return data.slice(0, 500);
-  return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
+  return Object.entries(data)
+    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(" ") : String(value)}`)
+    .join(" | ");
 }
 
 const formatDateTime = (value: string | null): string => {
   if (!value) return "Never synced";
-  return new Date(value).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  return new Date(value).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 };
 
-// Lets a single table's own screen manage its Google Sheet URLs directly
-// (add/remove, plus Sync Now) instead of going to Settings for it — this
-// was moved out of the old centralized "Table Sync" section in Settings,
-// which listed every table's sources in one place. Multiple sheets can
-// still feed the same table (e.g. one per office); syncing merges every
-// configured source's rows into one combined import.
 export function SheetSyncManagerDialog({
-  open, onOpenChange, table, label, onSynced,
+  open,
+  onOpenChange,
+  table,
+  label,
+  onSynced,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -53,6 +77,10 @@ export function SheetSyncManagerDialog({
   const [adding, setAdding] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
+  const [sourceToRemove, setSourceToRemove] = useState<SheetSyncSource | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -66,6 +94,9 @@ export function SheetSyncManagerDialog({
   useEffect(() => {
     if (open) {
       setError(null);
+      setSyncSummary(null);
+      setSourceToRemove(null);
+      setRemoveError(null);
       load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,10 +110,15 @@ export function SheetSyncManagerDialog({
     setAdding(true);
     setError(null);
     try {
-      await sheetSyncApi.create({ table, label: newLabel.trim(), url: newUrl.trim(), order: sources.length });
+      await sheetSyncApi.create({
+        table,
+        label: newLabel.trim(),
+        url: newUrl.trim(),
+        order: sources.length,
+      });
       setNewLabel("");
       setNewUrl("");
-      load();
+      await load();
     } catch (err) {
       setError(extractError(err));
     } finally {
@@ -90,84 +126,184 @@ export function SheetSyncManagerDialog({
     }
   };
 
-  const handleRemove = async (source: SheetSyncSource) => {
-    const result = await Swal.fire({
-      icon: "warning", title: `Remove "${source.label || source.url}"?`,
-      text: "This only stops syncing from it — it doesn't undo anything already imported.",
-      showCancelButton: true, confirmButtonText: "Remove", confirmButtonColor: "#dc2626", ...swalTheme,
-    });
-    if (!result.isConfirmed) return;
-    await sheetSyncApi.remove(source.id);
-    load();
+  const requestRemove = (source: SheetSyncSource) => {
+    setRemoveError(null);
+    setSourceToRemove(source);
+  };
+
+  const handleRemove = async () => {
+    if (!sourceToRemove) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await sheetSyncApi.remove(sourceToRemove.id);
+      setSourceToRemove(null);
+      await load();
+    } catch (err) {
+      setRemoveError(extractError(err));
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const handleSync = async () => {
     if (sources.length === 0) {
-      Swal.fire({ icon: "info", title: "No sheets configured", text: `Add at least one Google Sheet URL for ${label} first.`, ...swalTheme });
+      setError(`Add at least one Google Sheet URL for ${label} before syncing.`);
       return;
     }
+
     setSyncing(true);
+    setSyncSummary(null);
+    setError(null);
+
     try {
       const result = await sheetSyncApi.sync(table);
-      const failedSources = result.sources.filter((s) => s.error);
-      const r = result.result;
+      const failedSources = result.sources.filter((source) => source.error);
+      const syncResult = result.result;
       const counts = [
-        r.created !== undefined ? `${r.created} created` : null,
-        r.updated !== undefined ? `${r.updated} updated` : null,
-        r.linked !== undefined ? `${r.linked} linked` : null,
-        r.cluster_updated ? `${r.cluster_updated} assigned to MDS Regular` : null,
-      ].filter(Boolean).join(", ");
+        syncResult.created !== undefined ? `${syncResult.created} created` : null,
+        syncResult.updated !== undefined ? `${syncResult.updated} updated` : null,
+        syncResult.linked !== undefined ? `${syncResult.linked} linked` : null,
+        syncResult.cluster_updated
+          ? `${syncResult.cluster_updated} assigned to MDS Regular`
+          : null,
+      ].filter((count): count is string => Boolean(count));
 
-      await Swal.fire({
-        icon: failedSources.length > 0 ? "warning" : "success",
-        title: "Sync complete",
-        html: `
-          <p style="margin-bottom:8px">${counts || "Nothing new."}</p>
-          ${failedSources.length > 0
-            ? `<p style="color:#dc2626;font-size:13px">${failedSources.length} sheet(s) failed:</p><ul style="text-align:left;font-size:12px">${failedSources.map((s) => `<li>${s.label || s.url}: ${s.error}</li>`).join("")}</ul>`
-            : ""}
-          ${result.warnings.length > 0
-            ? `<p style="font-size:12px;margin-top:8px">${result.warnings.length} warning(s) — check the affected rows.</p>`
-            : ""}
-        `,
-        ...swalTheme,
+      setSyncSummary({
+        hasIssues: failedSources.length > 0 || result.warnings.length > 0,
+        counts,
+        failedSources,
+        warningCount: result.warnings.length,
       });
-      load();
+      await load();
       onSynced?.();
     } catch (err) {
-      Swal.fire({ icon: "error", title: "Sync failed", text: extractError(err), ...swalTheme });
+      setError(extractError(err));
     } finally {
       setSyncing(false);
     }
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && (syncing || adding || removing || sourceToRemove)) return;
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader className="border-b border-border">
           <DialogTitle>Sheet Setup — {label}</DialogTitle>
         </DialogHeader>
-        <div className="px-4 py-4 flex flex-col gap-3">
-          <p className="text-xs text-muted-foreground">
-            Drop in a Google Sheet's URL (shared as "Anyone with the link can view", or with the configured service account), then tap Sync to pull its rows straight into {label} — no more copy-pasting a CSV by hand. Add more than one sheet (e.g. one per office) as long as they share the same header columns; syncing merges them all into this one table.
+
+        <div className="flex flex-col gap-4 overflow-y-auto px-5 py-5">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Add Google Sheet URLs, then sync their rows directly into {label}.
+            Multiple sheets are merged when they use the same column headers.
           </p>
 
+          {syncSummary && (
+            <section
+              className={`rounded-xl border p-4 ${
+                syncSummary.hasIssues
+                  ? "border-amber-500/30 bg-amber-500/10"
+                  : "border-emerald-500/30 bg-emerald-500/10"
+              }`}
+              aria-live="polite"
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`mt-0.5 rounded-full p-2 ${
+                    syncSummary.hasIssues
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                      : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                  }`}
+                >
+                  {syncSummary.hasIssues ? (
+                    <AlertTriangle className="h-5 w-5" />
+                  ) : (
+                    <CheckCircle2 className="h-5 w-5" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {syncSummary.hasIssues ? "Sync completed with issues" : "Sync complete"}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {syncSummary.counts.length > 0
+                      ? syncSummary.counts.join(" · ")
+                      : "The sheets were already up to date."}
+                  </p>
+
+                  {syncSummary.failedSources.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-destructive/20 bg-background/70 px-3 py-2">
+                      <p className="text-xs font-medium text-destructive">
+                        {syncSummary.failedSources.length} sheet
+                        {syncSummary.failedSources.length === 1 ? "" : "s"} could not be synced
+                      </p>
+                      <ul className="mt-1 space-y-1 text-[11px] text-muted-foreground">
+                        {syncSummary.failedSources.map((source) => (
+                          <li key={source.id}>
+                            <span className="font-medium text-foreground">
+                              {source.label || source.url}:
+                            </span>{" "}
+                            {source.error}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {syncSummary.warningCount > 0 && (
+                    <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                      {syncSummary.warningCount} warning
+                      {syncSummary.warningCount === 1 ? "" : "s"} found. Review the imported
+                      rows before continuing.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="space-y-2" aria-label="Loading configured sheets">
+              <div className="h-14 animate-pulse rounded-lg bg-muted" />
+              <div className="h-14 animate-pulse rounded-lg bg-muted" />
+            </div>
           ) : sources.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No sheets configured yet.</p>
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
+              <Link2 className="mx-auto h-5 w-5 text-muted-foreground" />
+              <p className="mt-2 text-xs font-medium text-foreground">No sheets configured yet</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Add your first Google Sheet below.
+              </p>
+            </div>
           ) : (
-            <div className="flex flex-col gap-1.5">
-              {sources.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 text-xs border border-border rounded-md px-2.5 py-2">
-                  <Link2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <div className="flex flex-col gap-2">
+              {sources.map((source) => (
+                <div
+                  key={source.id}
+                  className="flex items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-xs"
+                >
+                  <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-foreground truncate font-medium">{s.label || "(untitled sheet)"}</p>
-                    <p className="text-muted-foreground truncate">{s.url}</p>
+                    <p className="truncate font-medium text-foreground">
+                      {source.label || "(untitled sheet)"}
+                    </p>
+                    <p className="truncate text-muted-foreground">{source.url}</p>
                   </div>
-                  <span className="text-[11px] text-muted-foreground shrink-0">{formatDateTime(s.last_synced_at)}</span>
-                  <button onClick={() => handleRemove(s)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0">
-                    <Trash2 className="w-3.5 h-3.5" />
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {formatDateTime(source.last_synced_at)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => requestRemove(source)}
+                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`Remove ${source.label || "sheet"}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ))}
@@ -175,33 +311,152 @@ export function SheetSyncManagerDialog({
           )}
 
           {error && (
-            <div className="bg-destructive/10 border border-destructive/30 text-destructive text-xs rounded-lg px-3 py-2">{error}</div>
+            <div
+              className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-destructive"
+              role="alert"
+            >
+              {error}
+            </div>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:flex-col sm:items-stretch">
             <Input
-              placeholder="Label (optional, e.g. Sheet 1)"
+              placeholder="Label (optional)"
               value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              className="max-w-[160px] h-8 text-xs"
+              onChange={(event) => setNewLabel(event.target.value)}
+              className="h-9 max-w-[170px] text-xs sm:max-w-none"
+              disabled={adding || syncing}
             />
             <Input
               placeholder="Paste Google Sheet URL…"
               value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              className="flex-1 h-8 text-xs"
+              onChange={(event) => setNewUrl(event.target.value)}
+              className="h-9 flex-1 text-xs"
+              disabled={adding || syncing}
             />
-            <Button size="sm" variant="outline" className="text-foreground shrink-0" onClick={handleAdd} disabled={adding}>
-              <Plus className="w-3.5 h-3.5 mr-1" /> Add
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 text-foreground"
+              onClick={handleAdd}
+              disabled={adding || syncing}
+            >
+              {adding ? (
+                <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus className="mr-1 h-3.5 w-3.5" />
+              )}
+              {adding ? "Adding…" : "Add"}
             </Button>
           </div>
         </div>
+
         <DialogFooter className="border-t border-border justify-end gap-2">
-          <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button onClick={handleSync} disabled={syncing}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`} /> {syncing ? "Syncing…" : "Sync Now"}
+          <Button
+            variant={syncSummary ? "default" : "outline"}
+            className={syncSummary ? "" : "text-foreground"}
+            onClick={() => handleOpenChange(false)}
+            disabled={syncing || adding}
+          >
+            {syncSummary ? "Done" : "Close"}
+          </Button>
+          <Button onClick={handleSync} disabled={syncing || adding || loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing…" : syncSummary ? "Sync Again" : "Sync Now"}
           </Button>
         </DialogFooter>
+
+        {sourceToRemove && (
+          <div
+            className="pointer-events-auto absolute inset-0 z-[70] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-[2px]"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !removing) {
+                setSourceToRemove(null);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !removing) {
+                event.preventDefault();
+                event.stopPropagation();
+                setSourceToRemove(null);
+              }
+            }}
+          >
+            <section
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="remove-sheet-title"
+              aria-describedby="remove-sheet-description"
+              className="relative w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl"
+            >
+              <button
+                type="button"
+                className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                onClick={() => setSourceToRemove(null)}
+                disabled={removing}
+                aria-label="Close confirmation"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 pr-5">
+                  <h2 id="remove-sheet-title" className="text-lg font-semibold text-foreground">
+                    Remove “{sourceToRemove.label || "this sheet"}”?
+                  </h2>
+                  <p
+                    id="remove-sheet-description"
+                    className="mt-2 text-sm leading-relaxed text-muted-foreground"
+                  >
+                    This stops future syncing from this source. Records that were already
+                    imported will not be deleted.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <p className="truncate text-xs font-medium text-foreground">
+                  {sourceToRemove.label || "(untitled sheet)"}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {sourceToRemove.url}
+                </p>
+              </div>
+
+              {removeError && (
+                <div
+                  className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                  role="alert"
+                >
+                  {removeError}
+                </div>
+              )}
+
+              <div className="mt-6 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  className="text-foreground"
+                  onClick={() => setSourceToRemove(null)}
+                  disabled={removing}
+                  autoFocus
+                >
+                  Cancel
+                </Button>
+                <Button variant="destructive" onClick={handleRemove} disabled={removing}>
+                  {removing ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="mr-2 h-4 w-4" />
+                  )}
+                  {removing ? "Removing…" : "Remove sheet"}
+                </Button>
+              </div>
+            </section>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
