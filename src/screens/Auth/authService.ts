@@ -2,6 +2,7 @@ import axios from "axios";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const API_PREFIX = "/api/v1";
+const LOGIN_URL = `${import.meta.env.BASE_URL}login`;
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -25,8 +26,8 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("auth_token");
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
+      if (window.location.pathname !== LOGIN_URL) {
+        window.location.href = LOGIN_URL;
       }
     }
     return Promise.reject(error);

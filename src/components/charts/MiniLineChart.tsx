@@ -82,7 +82,7 @@ export function MiniLineChart({
             fontSize: 12,
           }}
           labelStyle={{ color: chrome.text, fontWeight: 600 }}
-          labelFormatter={labelAt}
+          labelFormatter={(label) => labelAt(Number(label))}
           formatter={(value, name) => [fmt(Number(value)), String(name)]}
         />
         {series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}

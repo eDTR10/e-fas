@@ -1194,13 +1194,9 @@ function ClassTypeTable() {
         </DrawerContent>
       </Drawer>
 
-      <CodeNameBulkImportDialog
+      <ClassTypeBulkImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        title="Class Type"
-        codeLabel="Code"
-        nameLabel="Name"
-        api={{ previewImport: classTypeApi.previewImport, confirmImport: classTypeApi.confirmImport }}
         onImported={load}
       />
     </div>
@@ -1392,13 +1388,9 @@ function FundSourceTable() {
         </DrawerContent>
       </Drawer>
 
-      <CodeNameBulkImportDialog
+      <FundSourceBulkImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        title="Fund Source"
-        codeLabel="Code"
-        nameLabel="Name"
-        api={{ previewImport: fundSourceApi.previewImport, confirmImport: fundSourceApi.confirmImport }}
         onImported={load}
       />
     </div>

@@ -49,6 +49,8 @@ const withAuth = (el: JSX.Element) => (
   </ProtectedRoute>
 );
 
+const routerBaseName = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 const router = createBrowserRouter([
   // ── Auth pages (no navbar) ────────────────────────────
   {
@@ -61,6 +63,10 @@ const router = createBrowserRouter([
   },
 
   // ── Admin pages (no public navbar) ────────────────────
+  {
+    path: "/admin",
+    element: withAuth(<AdminDashboard />),
+  },
   {
     path: "/admin/dashboard",
     element: withAuth(<AdminDashboard />),
@@ -141,7 +147,7 @@ const router = createBrowserRouter([
     children: [
       {
         path: "/",
-        element: <Navigate to="/admin/dashboard" />,
+        element: <Navigate to="/admin" />,
       },
       {
         path: "/page1",
@@ -165,7 +171,9 @@ const router = createBrowserRouter([
       },
     ],
   },
-]);
+], {
+  basename: routerBaseName || "/",
+});
 
 function wait(time: number) {
   return new Promise((resolve) => {
