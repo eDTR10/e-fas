@@ -33,7 +33,7 @@ const MODEL_LABEL_OVERRIDES: Record<string, string> = {
   ReceivedSAROLineItem: "Received SARO Line Item",
   NTCA: "NTCA",
   NtcaTagging: "NTCA Tagging",
-  NtcaDisbursement: "NCA Tracker",
+  NtcaDisbursement: "Custom Disbursement",
   NtcaBalanceCategory: "NTCA Balance Category",
 };
 const modelLabel = (name: string): string => MODEL_LABEL_OVERRIDES[name] || name;

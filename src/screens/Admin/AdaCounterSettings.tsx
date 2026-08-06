@@ -2,22 +2,25 @@ import { useEffect, useState } from "react";
 import Swal from "sweetalert2";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { adaCounterApi, AdaCounter } from "../../lib/ntcaDisbursementApi";
+import { AdaCounter, adaCounterApi } from "../../lib/ntcaDisbursementApi";
 
-const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
+const swalTheme = {
+  background: "hsl(var(--background))",
+  color: "hsl(var(--foreground))",
+};
 
 const AdaCounterSettings = () => {
   const [counters, setCounters] = useState<AdaCounter[]>([]);
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       const data = await adaCounterApi.list();
       setCounters(data);
-      setDrafts(Object.fromEntries(data.map((c) => [c.id, String(c.next_number)])));
+      setDraft(String(Math.max(1, ...data.map((counter) => counter.next_number))));
     } finally {
       setLoading(false);
     }
@@ -27,54 +30,73 @@ const AdaCounterSettings = () => {
     load();
   }, []);
 
-  const handleSave = async (counter: AdaCounter) => {
-    const value = Number(drafts[counter.id]);
+  const currentValue = Math.max(
+    1,
+    ...counters.map((counter) => counter.next_number),
+  );
+
+  const handleSave = async () => {
+    const value = Number(draft);
     if (!Number.isInteger(value) || value < 1) {
-      Swal.fire({ icon: "error", title: "Enter a whole number of 1 or more", ...swalTheme });
+      Swal.fire({
+        icon: "error",
+        title: "Enter a whole number of 1 or more",
+        ...swalTheme,
+      });
       return;
     }
-    setSavingId(counter.id);
+    if (!counters[0]) return;
+
+    setSaving(true);
     try {
-      await adaCounterApi.update(counter.id, value);
-      Swal.fire({ icon: "success", title: "Updated", timer: 1000, showConfirmButton: false, ...swalTheme });
-      load();
+      // Update every legacy row as well as the shared server-side value so
+      // this remains safe while older API deployments are being upgraded.
+      await Promise.all(
+        counters.map((counter) => adaCounterApi.update(counter.id, value)),
+      );
+      await load();
+      Swal.fire({
+        icon: "success",
+        title: "Shared ADA counter updated",
+        timer: 1000,
+        showConfirmButton: false,
+        ...swalTheme,
+      });
     } finally {
-      setSavingId(null);
+      setSaving(false);
     }
   };
 
   return (
-    <section className="bg-card border border-border rounded-xl p-6">
-      <h2 className="text-sm font-semibold text-foreground mb-1">ADA Counters</h2>
-      <p className="text-xs text-muted-foreground mb-4">
-        The next ADA (Authority to Debit Account) number suggested when adding an NCA Tracker entry, per fund cluster.
-        It advances automatically each time a disbursement is saved — adjust it here if you ever need to correct it.
+    <section className="rounded-xl border border-border bg-card p-6">
+      <h2 className="mb-1 text-sm font-semibold text-foreground">Shared ADA Counter</h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        MDS Regular, MDS Special, and Trust use one ADA sequence, preventing
+        the same number from being generated twice in one year. Adjust this
+        only when starting an approved new series.
       </p>
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
-        <div className="flex flex-col gap-3 max-w-md">
-          {counters.map((c) => (
-            <div key={c.id} className="flex items-center gap-3">
-              <span className="text-sm text-foreground w-32 shrink-0">{c.fund_cluster_display}</span>
-              <Input
-                type="number"
-                className="w-32"
-                value={drafts[c.id] ?? ""}
-                onChange={(e) => setDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-foreground"
-                disabled={savingId === c.id || drafts[c.id] === String(c.next_number)}
-                onClick={() => handleSave(c)}
-              >
-                {savingId === c.id ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          ))}
+        <div className="flex max-w-md items-center gap-3">
+          <span className="w-32 shrink-0 text-sm text-foreground">Next ADA number</span>
+          <Input
+            type="number"
+            min="1"
+            className="w-32"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-foreground"
+            disabled={saving || draft === String(currentValue)}
+            onClick={handleSave}
+          >
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </div>
       )}
     </section>

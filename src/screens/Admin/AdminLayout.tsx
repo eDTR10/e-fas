@@ -57,7 +57,7 @@ const NAV_STRUCTURE: NavEntry[] = [
     type: "group", group: {
       title: "Cashier", items: [
         { to: "/admin/cashier/disbursement-tracker", label: "Disbursement Tracker", icon: ListChecks },
-        { to: "/admin/cashier/custom-disbursement", label: "NCA Tracker", icon: Wallet },
+        { to: "/admin/cashier/custom-disbursement", label: "Custom Disbursement", icon: Wallet },
         { to: "/admin/cashier/cashiering-tracker", label: "Cashiering Tracker", icon: FileSpreadsheet },
       ]
     }

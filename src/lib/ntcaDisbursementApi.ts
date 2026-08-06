@@ -26,6 +26,29 @@ export interface NtcaDisbursement {
 
 export type NtcaDisbursementPayload = Omit<NtcaDisbursement, "id" | "ntca_detail" | "created_at" | "updated_at">;
 
+export interface NtcaDisbursementBulkRow {
+  ntca: number;
+  fund_cluster: FundCluster;
+  date: string;
+  ada_no: string;
+  amount: number;
+  particulars: string;
+  row_number: number;
+}
+
+export interface NtcaDisbursementBulkRowResult {
+  row_number: number;
+  ok?: boolean;
+  error?: string;
+  id?: number;
+}
+
+export interface NtcaDisbursementBulkImportResult {
+  dry_run: boolean;
+  created: number;
+  rows: NtcaDisbursementBulkRowResult[];
+}
+
 export const adaCounterApi = {
   list: async (): Promise<AdaCounter[]> => {
     const { data } = await api.get<AdaCounter[]>(`${COUNTER_BASE}/`);
@@ -57,6 +80,13 @@ export const ntcaDisbursementApi = {
   },
   clearAll: async (): Promise<{ deleted: number }> => {
     const { data } = await api.post<{ deleted: number }>(`${DISBURSEMENT_BASE}/clear_all/`);
+    return data;
+  },
+  bulkImport: async (rows: NtcaDisbursementBulkRow[], dryRun: boolean): Promise<NtcaDisbursementBulkImportResult> => {
+    const { data } = await api.post<NtcaDisbursementBulkImportResult>(`${DISBURSEMENT_BASE}/bulk_import/`, {
+      rows,
+      dry_run: dryRun ? "true" : "false",
+    });
     return data;
   },
 };

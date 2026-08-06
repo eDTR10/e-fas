@@ -424,9 +424,9 @@ const UserPage = () => {
                     <button onClick={() => handleEdit(u)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => handleDelete(u)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                    {/* <button onClick={() => handleDelete(u)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                       <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    </button> */}
                   </div>
                 </div>
               ))

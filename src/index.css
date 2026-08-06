@@ -108,9 +108,24 @@
 /* SweetAlert is used throughout the admin area. Keep its actions readable
    and visually consistent in both themes, including when it opens above a
    Radix dialog. */
+
+/* Radix Dialog sets `pointer-events: none` on <body> (as an inline style)
+   while it's open, and only re-enables pointer events inside its own
+   Portal subtree. SweetAlert2 renders its popup as a separate element
+   appended directly to <body>, outside that subtree, so without this
+   override its buttons become unclickable — clicks fall through to
+   whatever Radix dialog is still open underneath — any time Swal.fire()
+   is called from inside an open dialog (very common in this app). Only
+   `!important` can win against that inline style.
+   SweetAlert2 adds the `swal2-shown` class to <body> itself while open. */
+body.swal2-shown {
+  pointer-events: auto !important;
+}
+
 .swal2-container {
   z-index: 11000 !important;
   padding: 1rem !important;
+  pointer-events: auto !important;
 }
 
 .swal2-popup {

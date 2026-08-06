@@ -29,12 +29,16 @@ export interface NTCA {
   // Original amount minus whatever's already been drawn against it via the
   // Custom Disbursement ledger — read-only, computed server-side.
   remaining_balance: string;
+  // Whether this NTCA shows up in Custom Disbursement's roll-forward
+  // table — an explicit per-NTCA opt-in rather than every NTCA with a
+  // nonzero balance auto-appearing there.
+  track_in_disbursement_ledger: boolean;
   is_archived: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export type NTCAPayload = Omit<NTCA, "id" | "remaining_balance" | "is_archived" | "created_at" | "updated_at">;
+export type NTCAPayload = Omit<NTCA, "id" | "remaining_balance" | "is_archived" | "track_in_disbursement_ledger" | "created_at" | "updated_at">;
 
 export interface NTCASaroMatch {
   id: number;
@@ -117,6 +121,16 @@ export const ntcaApi = {
 
   unarchive: async (id: number): Promise<NTCA> => {
     const { data } = await api.post<NTCA>(`${BASE}/${id}/unarchive/`);
+    return data;
+  },
+
+  trackInLedger: async (id: number): Promise<NTCA> => {
+    const { data } = await api.post<NTCA>(`${BASE}/${id}/track-in-ledger/`);
+    return data;
+  },
+
+  untrackInLedger: async (id: number): Promise<NTCA> => {
+    const { data } = await api.post<NTCA>(`${BASE}/${id}/untrack-in-ledger/`);
     return data;
   },
 
