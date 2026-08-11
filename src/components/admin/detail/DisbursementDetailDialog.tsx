@@ -22,14 +22,17 @@ export function DisbursementDetailDialog({
 
   const fields: DetailField[] = [
     { label: "Routing Slip No.", value: disbursement.routing_slip_no },
-    { label: "Date", value: formatDate(disbursement.date) },
+    { label: "Date/Time Processed", value: formatDate(disbursement.date) },
     { label: "Time Received / Time Process", value: disbursement.time_received },
+    { label: "Received by Budget Officer", value: disbursement.received_by_budget_officer },
+    { label: "Efficiency", value: disbursement.efficiency },
     { label: "Fund Source", value: disbursement.fund_source },
     { label: "ORS No.", value: disbursement.ors_no },
     { label: "Date Paid", value: formatDate(disbursement.date_paid) },
     { label: "ADA/Check", value: disbursement.ada_check },
     { label: "NCA", value: disbursement.nca !== null ? formatMoney(disbursement.nca) : undefined },
     { label: "Particulars", value: disbursement.particulars, span: 2 },
+    { label: "Remarks", value: disbursement.remarks, span: 2 },
   ]
 
   return (

@@ -54,12 +54,32 @@ const formatDate = (value: string | null | undefined): string => {
   return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 };
 
+// The sheet's own Fund Source column is free text and has accumulated a
+// pile of near-duplicate spellings ("MDS REGULAR", "Regular mds", "SPECIAL
+// FUND", "SPECIAL FUNDS", "TRUST FUND - AP", ...) — rather than surface
+// every distinct string as its own filter option, bucket every value down
+// to the 3 that actually matter by keyword, and treat anything that
+// doesn't mention "special" or "trust" as Regular (the common/default
+// case, including plain "MDS Regular" and any unlabeled/blank value).
+const FUND_SOURCE_CATEGORIES = ["MDS Regular", "MDS Special", "Trust Fund"] as const;
+type FundSourceCategory = typeof FUND_SOURCE_CATEGORIES[number];
+
+const normalizeFundSource = (raw: string): FundSourceCategory => {
+  const s = raw.toLowerCase();
+  if (s.includes("trust")) return "Trust Fund";
+  if (s.includes("special")) return "MDS Special";
+  return "MDS Regular";
+};
+
 // ── form value shape (everything as strings — that's what inputs give us) ──
 interface DisbursementForm {
   routing_slip_no: string;
   dv_number: string;
   date: string;
   time_received: string;
+  received_by_budget_officer: string;
+  efficiency: string;
+  remarks: string;
   fund_source: string;
   ors_no: string;
   name_of_claimant: string;
@@ -73,7 +93,8 @@ interface DisbursementForm {
 }
 
 const emptyForm = (): DisbursementForm => ({
-  routing_slip_no: "", dv_number: "", date: "", time_received: "", fund_source: "",
+  routing_slip_no: "", dv_number: "", date: "", time_received: "",
+  received_by_budget_officer: "", efficiency: "", remarks: "", fund_source: "",
   ors_no: "", name_of_claimant: "", particulars: "", amount: "", gross: "",
   net: "", date_paid: "", ada_check: "", nca: "",
 });
@@ -83,6 +104,9 @@ const disbursementToForm = (d: Disbursement): DisbursementForm => ({
   dv_number: d.dv_number || "",
   date: d.date || "",
   time_received: d.time_received || "",
+  received_by_budget_officer: d.received_by_budget_officer || "",
+  efficiency: d.efficiency || "",
+  remarks: d.remarks || "",
   fund_source: d.fund_source || "",
   ors_no: d.ors_no || "",
   name_of_claimant: d.name_of_claimant || "",
@@ -150,6 +174,9 @@ function DisbursementFormDialog({
         dv_number: form.dv_number.trim(),
         date: form.date || null,
         time_received: form.time_received.trim(),
+        received_by_budget_officer: form.received_by_budget_officer.trim(),
+        efficiency: form.efficiency.trim(),
+        remarks: form.remarks.trim(),
         fund_source: form.fund_source.trim(),
         ors_no: form.ors_no.trim(),
         name_of_claimant: form.name_of_claimant.trim(),
@@ -195,8 +222,10 @@ function DisbursementFormDialog({
           <div className="grid grid-cols-3 gap-4 slg:grid-cols-2 sm:grid-cols-1">
             {field("Routing Slip No.", <Input value={form.routing_slip_no} onChange={(e) => update("routing_slip_no", e.target.value)} placeholder="26-00062" />)}
             {field("DV Number *", <Input value={form.dv_number} onChange={(e) => update("dv_number", e.target.value)} placeholder="2026-01-0001" />)}
-            {field("Date", <Input type="date" value={form.date} onChange={(e) => update("date", e.target.value)} />)}
+            {field("Date/Time Processed", <Input type="date" value={form.date} onChange={(e) => update("date", e.target.value)} />)}
             {field("Time Received / Time Process", <Input value={form.time_received} onChange={(e) => update("time_received", e.target.value)} placeholder="11:30:00 AM" />)}
+            {field("Received by Budget Officer", <Input value={form.received_by_budget_officer} onChange={(e) => update("received_by_budget_officer", e.target.value)} />)}
+            {field("Efficiency", <Input value={form.efficiency} onChange={(e) => update("efficiency", e.target.value)} />)}
             {field("Fund Source", <Input value={form.fund_source} onChange={(e) => update("fund_source", e.target.value)} placeholder="MDS REGULAR" />)}
             {field("Amount *", <Input type="number" step="0.01" value={form.amount} onChange={(e) => update("amount", e.target.value)} />)}
 
@@ -230,6 +259,10 @@ function DisbursementFormDialog({
 
             <div className="col-span-2 slg:col-span-1">
               {field("Particulars", <Input value={form.particulars} onChange={(e) => update("particulars", e.target.value)} />)}
+            </div>
+
+            <div className="col-span-3 slg:col-span-2 sm:col-span-1">
+              {field("Remarks", <Input value={form.remarks} onChange={(e) => update("remarks", e.target.value)} />)}
             </div>
 
             {field("Gross (auto from RAOD)", <Input type="number" step="0.01" value={form.gross} onChange={(e) => update("gross", e.target.value)} />)}
@@ -327,14 +360,14 @@ function DisbursementImportDialog({
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              Paste CSV content (including the header row — Routing Slip No., DV Number, Date, Time Received / Time Process, Fund Source, ORS No., Name of Claimant, Particulars, Amount, ...)
+              Paste CSV content (including the header row — Routing Slip No., DV Number, Received By Budget Officer, Date/Time Processed, Efficiency, Remarks, Time Received / Time Process, Fund Source, ORS No., Name of Claimant, Particulars, Amount, ...)
             </label>
             <textarea
               value={csvText}
               onChange={(e) => { setCsvText(e.target.value); setRows(null); }}
               rows={8}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
-              placeholder="ROUTING SLIP NO.,DV NUMBER,DATE,TIME RECEIVED / TIME PROCESS,Fund Source,ORS NO.,NAME OF CLAIMANT,PARTICULARS,AMOUNT,GROSS,NET,DATE PAID,ADA/CHECK,NCA"
+              placeholder="ROUTING SLIP NO.,DV NUMBER,RECEIVED BY BUDGET OFFICER,DATE/TIME PROCESSED,EFFICIENCY,REMARKS,TIME RECEIVED / TIME PROCESS,Fund Source,ORS NO.,NAME OF CLAIMANT,PARTICULARS,AMOUNT,GROSS,NET,DATE PAID,ADA/CHECK,NCA"
             />
           </div>
 
@@ -494,12 +527,6 @@ const DisbursementTrackerPage = () => {
     return Array.from(years).sort((a, b) => b - a);
   }, [entries]);
 
-  const fundSourceOptions = useMemo(() => {
-    const set = new Set<string>();
-    entries.forEach((d) => { if (d.fund_source) set.add(d.fund_source); });
-    return Array.from(set).sort();
-  }, [entries]);
-
   const {
     year, quarter, dateFrom, dateTo,
     setYear, applyQuarter, setDateFrom, setDateTo,
@@ -514,7 +541,7 @@ const DisbursementTrackerPage = () => {
     const q = search.toLowerCase();
     return entries.filter((d) => {
       if (d.date && !inRange(d.date)) return false;
-      if (fundSourceFilter && d.fund_source !== fundSourceFilter) return false;
+      if (fundSourceFilter && normalizeFundSource(d.fund_source) !== fundSourceFilter) return false;
       if (!q) return true;
       return (
         d.dv_number.toLowerCase().includes(q) ||
@@ -655,7 +682,7 @@ const DisbursementTrackerPage = () => {
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
         >
           <option value="">All Fund Sources</option>
-          {fundSourceOptions.map((fs) => <option key={fs} value={fs}>{fs}</option>)}
+          {FUND_SOURCE_CATEGORIES.map((fs) => <option key={fs} value={fs}>{fs}</option>)}
         </select>
         <select
           value={statusFilter}
@@ -702,15 +729,14 @@ const DisbursementTrackerPage = () => {
         </div>
       </div>
 
-      {/* KPI Strip — Total Amount/Paid are summed per DV (groups), not per
-          raw ORS-line record, since Amount is a whole-DV total repeated on
-          every one of its ORS split lines (summing the raw entries would
-          double/triple-count a multi-ORS DV). Gross genuinely is a
-          per-line figure, so that one does sum over filtered entries. */}
+      {/* KPI Strip — Total Amount/Net/Paid are summed per DV (groups), not
+          per raw ORS-line record, since both Amount and Net are whole-DV
+          totals repeated on every one of a DV's ORS split lines (summing
+          the raw entries would double/triple-count a multi-ORS DV). */}
       <KpiStrip cards={[
         { title: "Total Amount", value: formatMoney(groups.reduce((s, g) => s + g.totalAmount, 0)), icon: FileText },
         { title: "Total DVs", value: String(groups.length), icon: Wallet },
-        { title: "Total Gross (from RAOD)", value: formatMoney(filtered.reduce((s, x) => s + Number(x.gross || 0), 0)), icon: Scale },
+        { title: "Total Net", value: formatMoney(groups.reduce((s, g) => s + Number(g.net || 0), 0)), icon: Scale },
         { title: "Paid", value: String(groups.filter((g) => g.isPaid).length), icon: AlertTriangle },
       ]} />
 
@@ -721,15 +747,11 @@ const DisbursementTrackerPage = () => {
       ) : (
         <>
           <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[24px_24px_1.2fr_110px_1fr_1fr_1fr_90px] gap-3 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.2fr_1fr_auto]">
+            <div className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr_1fr_90px] gap-3 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.2fr_1fr_auto]">
               <SelectAllCheckbox checked={isAllSelected(pageEntryIds)} indeterminate={isSomeSelected(pageEntryIds)} onChange={() => toggleAll(pageEntryIds)} />
               <span />
               <SortFilterHeader label="DV No." sortKey="dv_number" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
                 filterValue={columnFilters.dv_number || ""} onFilterChange={(v) => setColumnFilter("dv_number", v)} filterPlaceholder="Filter…" />
-              <div className="slg:hidden">
-                <SortFilterHeader label="Routing Slip" sortKey="routing_slip_no" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
-                  filterValue={columnFilters.routing_slip_no || ""} onFilterChange={(v) => setColumnFilter("routing_slip_no", v)} filterPlaceholder="Filter…" />
-              </div>
               <div className="slg:hidden">
                 <SortFilterHeader label="Claimant" sortKey="name_of_claimant" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
                   filterValue={columnFilters.name_of_claimant || ""} onFilterChange={(v) => setColumnFilter("name_of_claimant", v)} filterPlaceholder="Filter…" />
@@ -752,7 +774,7 @@ const DisbursementTrackerPage = () => {
                   <div key={g.key}>
                     <div
                       onClick={() => toggleExpanded(g.key)}
-                      className="grid grid-cols-[24px_24px_1.2fr_110px_1fr_1fr_1fr_90px] gap-3 px-5 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.2fr_1fr_auto] cursor-pointer"
+                      className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr_1fr_90px] gap-3 px-5 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.2fr_1fr_auto] cursor-pointer"
                     >
                       <SelectAllCheckbox
                         checked={isAllSelected(groupIds)}
@@ -769,7 +791,6 @@ const DisbursementTrackerPage = () => {
                           {formatDate(g.date)} · {g.entries.length} ORS line{g.entries.length === 1 ? "" : "s"}
                         </p>
                       </div>
-                      <p className="text-sm text-foreground truncate slg:hidden">{g.routing_slip_no || "—"}</p>
                       <p className="text-sm text-foreground truncate slg:hidden">{g.name_of_claimant || "—"}</p>
                       <div className="min-w-0 slg:hidden"><CategoryChip label={g.fund_source} /></div>
                       <p className="text-sm font-medium text-foreground">{formatMoney(g.totalAmount)}</p>

@@ -1,6 +1,6 @@
 import {
   Search, Plus, Upload, Trash2, Pencil, Archive, ArchiveRestore, Link2, Link2Off,
-  FileText, Wallet, AlertTriangle, Settings, Scale, ChevronDown, ChevronRight,
+  FileText, AlertTriangle, Settings, Scale, ChevronDown, ChevronRight,
 } from "lucide-react";
 import KpiStrip from "../../components/ui/kpi-strip";
 import Swal from "sweetalert2";
@@ -775,7 +775,6 @@ const NtcaPage = () => {
         { title: "Total NTCA Amount", value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount || 0), 0)), icon: FileText },
         { title: "Linked to SARO", value: String(filtered.filter((x) => x.saro_no && saroById.has(x.saro_no)).length), caption: `${filtered.length} total`, icon: Link2 },
         { title: "Unlinked NTCA", value: String(filtered.filter((x) => !x.saro_no || !saroById.has(x.saro_no)).length), icon: Link2Off },
-        { title: "Avg per NTCA", value: formatMoney(filtered.length ? filtered.reduce((s, x) => s + Number(x.amount || 0), 0) / filtered.length : 0), icon: Wallet },
       ]} />
 
       <BulkActionBar

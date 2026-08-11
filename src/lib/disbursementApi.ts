@@ -13,6 +13,9 @@ export interface Disbursement {
   dv_number: string;
   date: string | null;
   time_received: string;
+  received_by_budget_officer: string;
+  efficiency: string;
+  remarks: string;
   fund_source: string;
   ors_no: string;
   name_of_claimant: string;
@@ -34,6 +37,9 @@ export interface DisbursementImportRow {
   dv_number: string;
   date: string | null;
   time_received: string;
+  received_by_budget_officer?: string;
+  efficiency?: string;
+  remarks?: string;
   fund_source: string;
   ors_no: string;
   name_of_claimant: string;
