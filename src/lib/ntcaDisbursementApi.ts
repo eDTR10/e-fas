@@ -13,8 +13,13 @@ export interface AdaCounter {
 
 export interface NtcaDisbursement {
   id: number;
-  ntca: number;
-  ntca_detail: NTCA;
+  // Null for an "advance" disbursement — money already paid out against an
+  // NCA that hasn't been received/logged as an NTCA record yet. `raw_ntca_no`
+  // keeps the NCA No. text so the row still shows something meaningful (see
+  // NtcaDisbursement.ntca in the backend model).
+  ntca: number | null;
+  ntca_detail: NTCA | null;
+  raw_ntca_no: string;
   fund_cluster: FundCluster;
   date: string;
   ada_no: string;
@@ -24,10 +29,16 @@ export interface NtcaDisbursement {
   updated_at: string;
 }
 
-export type NtcaDisbursementPayload = Omit<NtcaDisbursement, "id" | "ntca_detail" | "created_at" | "updated_at">;
+// raw_ntca_no is optional here (unlike on NtcaDisbursement itself) — only
+// the paste-import/advance-disbursement path ever needs to set it; a normal
+// manual add/edit through DisbursementDialog always has a real `ntca` link
+// and has nothing meaningful to put there.
+export type NtcaDisbursementPayload =
+  Omit<NtcaDisbursement, "id" | "ntca_detail" | "created_at" | "updated_at" | "raw_ntca_no"> & { raw_ntca_no?: string };
 
 export interface NtcaDisbursementBulkRow {
-  ntca: number;
+  ntca: number | null;
+  raw_ntca_no?: string;
   fund_cluster: FundCluster;
   date: string;
   ada_no: string;
@@ -56,6 +67,14 @@ export const adaCounterApi = {
   },
   update: async (id: number, next_number: number): Promise<AdaCounter> => {
     const { data } = await api.patch<AdaCounter>(`${COUNTER_BASE}/${id}/`, { next_number });
+    return data;
+  },
+  // Sets every fund cluster's counter back to #001 — e.g. an approved new
+  // annual series. Only "sticks" if the current year has no disbursements
+  // yet; otherwise the next list() call self-heals it past them again
+  // (see AdaCounterViewSet.list in the backend).
+  reset: async (): Promise<{ next_number: number }> => {
+    const { data } = await api.post<{ next_number: number }>(`${COUNTER_BASE}/reset/`);
     return data;
   },
 };

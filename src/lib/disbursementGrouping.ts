@@ -15,7 +15,7 @@ export interface DisbursementGroup {
   entries: Disbursement[]
   totalAmount: number
   totalGross: number
-  net: string | null
+  totalNet: number
   date_paid: string | null
   ada_check: string
   nca: string | null
@@ -37,10 +37,9 @@ export function groupDisbursements(entries: Disbursement[]): DisbursementGroup[]
   return order.map((key) => {
     const list = map.get(key)!
     const first = list[0]
-    // Net/Date Paid/ADA-Check/NCA are DV-level facts (one payment covers
-    // the whole DV) — they aren't expected to repeat per ORS line, so the
-    // group just surfaces whichever line actually has them set.
-    const netRow = list.find((d) => d.net !== null && d.net !== "")
+    // Amount is a whole-DV value, but Net may be a real per-ORS breakdown
+    // in the source tracker. Sum imported Net lines so the KPI agrees with
+    // the spreadsheet's Net column instead of discarding all but one line.
     const datePaidRow = list.find((d) => !!d.date_paid)
     const adaCheckRow = list.find((d) => !!d.ada_check)
     const ncaRow = list.find((d) => d.nca !== null && d.nca !== "")
@@ -59,7 +58,7 @@ export function groupDisbursements(entries: Disbursement[]): DisbursementGroup[]
       // the whole).
       totalAmount: toNumber(first.amount),
       totalGross: list.reduce((s, x) => s + toNumber(x.gross), 0),
-      net: netRow?.net ?? null,
+      totalNet: list.reduce((s, x) => s + toNumber(x.net), 0),
       date_paid: datePaidRow?.date_paid ?? null,
       ada_check: adaCheckRow?.ada_check ?? "",
       nca: ncaRow?.nca ?? null,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Search, Plus, Upload, Trash2, Pencil, FileText, Wallet, Scale, AlertTriangle,
-  Link2, Link2Off, ChevronDown, ChevronRight, RefreshCw, Settings,
+  Link2, Link2Off, ChevronDown, ChevronRight, RefreshCw, Settings, FileWarning,
 } from "lucide-react";
 import KpiStrip from "../../components/ui/kpi-strip";
 import Swal from "sweetalert2";
@@ -30,6 +30,10 @@ import { BulkActionBar } from "../../components/ui/bulk-action-bar";
 import { SelectAllCheckbox } from "../../components/ui/select-all-checkbox";
 import { useSelection } from "../../lib/useSelection";
 import { SheetSyncManagerDialog } from "../../components/admin/SheetSyncManagerDialog";
+import { UnmatchedAcctgDialog } from "../../components/admin/UnmatchedAcctgDialog";
+import { TotalNetBreakdownDialog } from "../../components/admin/TotalNetBreakdownDialog";
+import { unmatchedAcctgApi } from "../../lib/unmatchedAcctgApi";
+import { toNumber } from "../../lib/formatters";
 
 
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
@@ -461,6 +465,10 @@ const DisbursementTrackerPage = () => {
   const [recomputing, setRecomputing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  const [unmatchedAcctgOpen, setUnmatchedAcctgOpen] = useState(false);
+  const [unmatchedAcctgCount, setUnmatchedAcctgCount] = useState<number | null>(null);
+  const [unmatchedAcctgNetSum, setUnmatchedAcctgNetSum] = useState(0);
+  const [netBreakdownOpen, setNetBreakdownOpen] = useState(false);
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -474,7 +482,13 @@ const DisbursementTrackerPage = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  const loadUnmatchedAcctgCount = async () => {
+    const list = await unmatchedAcctgApi.list();
+    setUnmatchedAcctgCount(list.length);
+    setUnmatchedAcctgNetSum(list.reduce((s, e) => s + toNumber(e.net), 0));
+  };
+
+  useEffect(() => { load(); loadUnmatchedAcctgCount(); }, []);
 
   const handleRecomputeGross = async () => {
     setRecomputing(true);
@@ -499,13 +513,30 @@ const DisbursementTrackerPage = () => {
         r.linked !== undefined ? `${r.linked} linked` : null,
       ].filter(Boolean).join(", ");
 
+      // Net (Acctg) is a separate, optional enrichment source — folded into
+      // the same "Sync Sheets" click (running after the main DV sync so its
+      // Net value wins) so Total Net stays current without a second click.
+      // A user who hasn't configured it via "Net Source" yet shouldn't see
+      // this as a failure.
+      let netCounts: string | null = null;
+      let netFailedSources: typeof failedSources = [];
+      try {
+        const netResult = await sheetSyncApi.sync("disbursement_tracker_net");
+        netFailedSources = netResult.sources.filter((s) => s.error);
+        netCounts = netResult.result.updated !== undefined ? `${netResult.result.updated} net value(s) updated` : null;
+      } catch (netErr) {
+        const detail = (netErr as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+        if (!detail?.includes("No sheet URLs configured")) throw netErr;
+      }
+
+      const allFailedSources = [...failedSources, ...netFailedSources];
       await Swal.fire({
-        icon: failedSources.length > 0 ? "warning" : "success",
+        icon: allFailedSources.length > 0 ? "warning" : "success",
         title: "Sync complete",
         html: `
-          <p style="margin-bottom:8px">${counts || "Nothing new."}</p>
-          ${failedSources.length > 0
-            ? `<p style="color:#dc2626;font-size:13px">${failedSources.length} sheet(s) failed:</p><ul style="text-align:left;font-size:12px">${failedSources.map((s) => `<li>${s.label || s.url}: ${s.error}</li>`).join("")}</ul>`
+          <p style="margin-bottom:8px">${[counts, netCounts].filter(Boolean).join(", ") || "Nothing new."}</p>
+          ${allFailedSources.length > 0
+            ? `<p style="color:#dc2626;font-size:13px">${allFailedSources.length} sheet(s) failed:</p><ul style="text-align:left;font-size:12px">${allFailedSources.map((s) => `<li>${s.label || s.url}: ${s.error}</li>`).join("")}</ul>`
             : ""}
           ${result.warnings.length > 0
             ? `<p style="font-size:12px;margin-top:8px">${result.warnings.length} warning(s) — check the affected rows.</p>`
@@ -514,6 +545,7 @@ const DisbursementTrackerPage = () => {
         ...swalTheme,
       });
       load();
+      loadUnmatchedAcctgCount();
     } catch (err) {
       Swal.fire({ icon: "error", title: "Sync failed", text: extractError(err), ...swalTheme });
     } finally {
@@ -659,6 +691,9 @@ const DisbursementTrackerPage = () => {
     Swal.fire({ icon: "success", title: `Deleted ${deleted} entries`, timer: 1300, showConfirmButton: false, ...swalTheme });
     clearSelection();
     load();
+    // clear_all also resets UnmatchedAcctgEntry server-side (see saro/views.py) —
+    // refresh the local count/sum so Total Net doesn't keep showing a stale figure.
+    loadUnmatchedAcctgCount();
   };
 
   return (
@@ -717,6 +752,15 @@ const DisbursementTrackerPage = () => {
           <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Manage Google Sheet sources">
             <Link2 className="w-4 h-4 mr-2" /> Sheet Setup
           </Button>
+          <Button
+            variant="outline"
+            className="text-foreground"
+            onClick={() => setUnmatchedAcctgOpen(true)}
+            title="Acctg rows with a Net Amount but no matching DV in this tracker"
+          >
+            <FileWarning className="w-4 h-4 mr-2" />
+            DVs Not Yet in Tracker{unmatchedAcctgCount ? ` (${unmatchedAcctgCount})` : ""}
+          </Button>
           <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
             <Upload className="w-4 h-4 mr-2" /> Bulk Import
           </Button>
@@ -729,14 +773,20 @@ const DisbursementTrackerPage = () => {
         </div>
       </div>
 
-      {/* KPI Strip — Total Amount/Net/Paid are summed per DV (groups), not
-          per raw ORS-line record, since both Amount and Net are whole-DV
-          totals repeated on every one of a DV's ORS split lines (summing
-          the raw entries would double/triple-count a multi-ORS DV). */}
+      {/* Amount is a whole-DV value, while Net is preserved per source ORS
+          line. This keeps the DV count/Amount grouped without dropping the
+          Net breakdown recorded in the working sheet. */}
       <KpiStrip cards={[
         { title: "Total Amount", value: formatMoney(groups.reduce((s, g) => s + g.totalAmount, 0)), icon: FileText },
         { title: "Total DVs", value: String(groups.length), icon: Wallet },
-        { title: "Total Net", value: formatMoney(groups.reduce((s, g) => s + Number(g.net || 0), 0)), icon: Scale },
+        {
+          title: "Total Net",
+          value: formatMoney(groups.reduce((s, g) => s + g.totalNet, 0) + unmatchedAcctgNetSum),
+          caption: unmatchedAcctgNetSum > 0 ? `Incl. ${formatMoney(unmatchedAcctgNetSum)} not yet in tracker` : undefined,
+          captionTone: "warning",
+          icon: Scale,
+          onClick: () => setNetBreakdownOpen(true),
+        },
         { title: "Paid", value: String(groups.filter((g) => g.isPaid).length), icon: AlertTriangle },
       ]} />
 
@@ -869,7 +919,17 @@ const DisbursementTrackerPage = () => {
       <DisbursementFormDialog open={formOpen} onOpenChange={setFormOpen} editing={editing} onSaved={load} />
       <DisbursementImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={load} />
       <DisbursementDetailDialog disbursement={viewing} open={!!viewing} onOpenChange={(open) => !open && setViewing(null)} />
-      <SheetSyncManagerDialog open={sheetSetupOpen} onOpenChange={setSheetSetupOpen} table="disbursement_tracker" label="Disbursement Tracker" onSynced={load} />
+      <SheetSyncManagerDialog
+        open={sheetSetupOpen}
+        onOpenChange={setSheetSetupOpen}
+        table="disbursement_tracker"
+        label="Disbursement Tracker"
+        secondaryTable="disbursement_tracker_net"
+        secondaryLabel="Net Amount (Acctg)"
+        onSynced={() => { load(); loadUnmatchedAcctgCount(); }}
+      />
+      <UnmatchedAcctgDialog open={unmatchedAcctgOpen} onOpenChange={setUnmatchedAcctgOpen} />
+      <TotalNetBreakdownDialog open={netBreakdownOpen} onOpenChange={setNetBreakdownOpen} entries={filtered} />
     </AdminLayout>
   );
 };

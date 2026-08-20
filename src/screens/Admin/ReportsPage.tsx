@@ -711,8 +711,13 @@ function ReportTab({ config }: { config: ReportConfig }) {
   };
 
   const handleExportCsv = () => {
+    // Built from local Y-M-D, not toISOString() (which converts through UTC
+    // and can label the file with yesterday's date for anyone exporting
+    // near midnight in a timezone ahead of UTC, e.g. the Philippines).
+    const today = new Date();
+    const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     downloadCsv(
-      `${config.kind}_report_${new Date().toISOString().slice(0, 10)}`,
+      `${config.kind}_report_${localDate}`,
       [
         { key: "mds_type", label: "Type", format: (r: ReportRow) => config.mdsTypeOptions.find((o) => o.value === r.mds_type)?.label || r.mds_type },
         { key: "date", label: "Date", format: (r: ReportRow) => formatDate(r.date) },

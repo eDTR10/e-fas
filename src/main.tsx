@@ -33,6 +33,7 @@ const AdminPlaceholder = lazy(() => import("./screens/Admin/Placeholder.tsx"));
 const AdminReceivedSaro = lazy(() => import("./screens/Admin/ReceivedSaroPage.tsx"));
 const AdminNtca = lazy(() => import("./screens/Admin/NtcaPage.tsx"));
 const AdminRaod = lazy(() => import("./screens/Admin/RaodPage.tsx"));
+const AdminRealignment = lazy(() => import("./screens/Admin/RealignmentPage.tsx"));
 const AdminCustomDisbursement = lazy(() => import("./screens/Admin/CustomDisbursementPage.tsx"));
 const AdminDisbursementTracker = lazy(() => import("./screens/Admin/DisbursementTrackerPage.tsx"));
 const AdminNtcaBalance = lazy(() => import("./screens/Admin/NtcaBalancePage.tsx"));
@@ -82,7 +83,7 @@ const router = createBrowserRouter([
   },
   {
     path: "/admin/budget/realignment",
-    element: withAuth(<AdminPlaceholder title="Realignment" />),
+    element: withAuth(<AdminRealignment />),
   },
   {
     path: "/admin/accounting/ntca",

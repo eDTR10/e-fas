@@ -29,6 +29,12 @@ export interface ParsedLedgerRow {
   adaNo: string;
   amount: number | null;
   issues: string[];
+  // True when rawNtca doesn't match any NTCA record in this fund cluster at
+  // all — an "advance" disbursement, paid before its NCA has been received/
+  // logged yet. Unlike a real issue, this doesn't block import: the row is
+  // still sent, just with no `ntca` link (see NtcaDisbursement.ntca in the
+  // backend model) and rawNtca preserved for the UI to flag red.
+  advance: boolean;
 }
 
 const HEADER_SCAN_WINDOW = 3;
@@ -433,9 +439,16 @@ export function parseNtcaLedgerPaste(
     }
 
     const issues: string[] = [];
+    // Genuinely no NTCA record for this NCA No. yet is NOT a blocker — the
+    // row still imports as an advance disbursement (see the `advance` flag
+    // on ParsedLedgerRow). A record that *does* exist but can't cover the
+    // amount (not received yet as of this date, or insufficient overall)
+    // stays a real, blocking issue — that's an actual balance problem, not
+    // just a timing/ordering one.
+    let advance = false;
     if (!effectiveRawDate || !date) issues.push("Missing or unparseable date");
     if (!rawNtca) issues.push("Missing NCA number");
-    else if (!pool) issues.push(`NCA "${rawNtca}" not found for this fund cluster`);
+    else if (!pool) advance = true;
     else if (adaDuplicateYear !== null) { /* reported below, don't also report a balance issue for a row that was never simulated */ }
     else if (!ntcaMatch && date && availableAsOfDate <= 0) issues.push(`NCA "${rawNtca}" wasn't received yet as of ${date}`);
     else if (!ntcaMatch && date) issues.push(`NCA "${rawNtca}" doesn't have enough combined balance left as of ${date}`);
@@ -455,6 +468,7 @@ export function parseNtcaLedgerPaste(
       adaNo,
       amount,
       issues,
+      advance,
     });
   }
 

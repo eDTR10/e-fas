@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Upload, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import {
+  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2,
+} from "lucide-react";
 import Swal from "sweetalert2";
 import AdminLayout from "./AdminLayout";
 import { TableSkeleton } from "./Skeleton";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "../../components/ui/dialog";
@@ -11,24 +14,46 @@ import { SelectAllCheckbox } from "../../components/ui/select-all-checkbox";
 import { BulkActionBar } from "../../components/ui/bulk-action-bar";
 import { useSelection } from "../../lib/useSelection";
 import { CategoryChip } from "../../components/ui/category-chip";
+import { QuickFillSelect } from "../../components/ui/quick-fill-select";
 import {
-  ntcaBalanceApi, NtcaBalanceReport, NtcaBalanceImportCategoryRow, NtcaBalanceFundCluster,
+  ntcaBalanceApi, NtcaBalanceReport, NtcaBalanceFundCluster,
+  NtcaBalanceCategoryReport, NtcaBalanceSaroReport, FUND_CLUSTER_OPTIONS,
 } from "../../lib/ntcaBalanceApi";
+import { FundCluster } from "../../lib/ntcaApi";
+import { receivedSaroApi, ReceivedSARO } from "../../lib/receivedSaroApi";
 
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
+
+function extractError(err: unknown): string {
+  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+  if (!data) return "Failed to save. Please try again.";
+  return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+      {children}
+    </div>
+  );
+}
 
 const FUND_CLUSTER_TABS: { value: NtcaBalanceFundCluster; label: string }[] = [
   { value: "mds_regular", label: "MDS Regular" },
   { value: "mds_special", label: "MDS Special" },
-  { value: "unclassified", label: "Unclassified" },
+  { value: "trust", label: "Trust" },
 ];
 
 const QUARTER_LABELS = ["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"];
 
 // Shared by the header and every data row so columns always line up.
 // Leading "24px 24px" is the select checkbox, then the expand chevron.
+// "104px" right after SARO No. is the add/edit/delete action icons — kept
+// near the front (not trailing after 15 numeric columns) so it's visible
+// without scrolling the table horizontally.
 const GRID_TEMPLATE_COLUMNS =
-  "24px 24px minmax(160px, 1.3fr) minmax(200px, 1.6fr) minmax(110px, 1fr) " +
+  "24px 24px minmax(160px, 1.3fr) minmax(200px, 1.6fr) minmax(110px, 1fr) 104px " +
   "repeat(4, 90px) 100px repeat(4, 90px) 100px repeat(4, 90px) 100px";
 
 const formatMoney = (value: string | number | null | undefined): string => {
@@ -39,168 +64,215 @@ const formatMoney = (value: string | number | null | undefined): string => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// Bulk import dialog — paste the "NTCA Balance (Per SARO)" CSV, preview the
-// category/SARO grouping it describes, then replace the whole grouping.
+// Add/rename a category — deliberately name+order only. Tagged SARO rows
+// are managed inline in the report table itself (see SaroFormDialog) via
+// their own standalone endpoint, so this never touches `saros` and never
+// risks discarding another row's id (see ntcaBalanceApi.updateMeta).
+// On a fresh Add (not Edit), the caller chains straight into "Tag a SARO"
+// for the category just created — see NtcaBalancePage's onCategoryCreated.
 // ─────────────────────────────────────────────────────────────────────────
-function NtcaBalanceImportDialog({
-  open, onOpenChange, onImported, fundCluster, fundClusterLabel,
+function CategoryFormDialog({
+  open, onOpenChange, editing, nextOrder, onSaved, onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImported: () => void;
-  fundCluster: NtcaBalanceFundCluster;
-  fundClusterLabel: string;
+  editing: NtcaBalanceCategoryReport | null;
+  nextOrder: number;
+  onSaved: () => void;
+  onCreated: (categoryId: number, categoryName: string) => void;
 }) {
-  const [csvText, setCsvText] = useState("");
-  const [categories, setCategories] = useState<NtcaBalanceImportCategoryRow[] | null>(null);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
+  const [order, setOrder] = useState("0");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    if (open) {
-      setCsvText("");
-      setCategories(null);
-      setWarnings([]);
-      setError(null);
-      setExpanded(new Set());
-    }
-  }, [open]);
+    if (!open) return;
+    setName(editing?.name ?? "");
+    setOrder(String(editing?.order ?? nextOrder));
+    setError(null);
+  }, [open, editing, nextOrder]);
 
-  const handlePreview = async () => {
-    if (!csvText.trim()) {
-      setError("Paste some CSV content first.");
+  const handleSubmit = async () => {
+    if (!name.trim()) {
+      setError("Category name is required.");
       return;
     }
-    setBusy(true);
+    setSaving(true);
     setError(null);
     try {
-      const result = await ntcaBalanceApi.previewImport(csvText, fundCluster);
-      setCategories(result.categories);
-      setWarnings(result.warnings);
-    } catch {
-      setError("Could not parse this CSV. Check that it includes the PAP / Purpose / SARO No. header row.");
+      if (editing) {
+        await ntcaBalanceApi.updateMeta(editing.id, { name: name.trim(), order: Number(order) || 0 });
+        Swal.fire({ icon: "success", title: "Category updated", timer: 1200, showConfirmButton: false, ...swalTheme });
+        onOpenChange(false);
+        onSaved();
+      } else {
+        const created = await ntcaBalanceApi.create({ name: name.trim(), order: Number(order) || 0, saros: [] });
+        onOpenChange(false);
+        onSaved();
+        onCreated(created.id, created.name);
+      }
+    } catch (err) {
+      setError(extractError(err));
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   };
-
-  const handleConfirm = async () => {
-    if (!categories) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await ntcaBalanceApi.confirmImport(categories, fundCluster);
-      Swal.fire({
-        icon: "success",
-        title: "Import complete",
-        text: `Replaced the report with ${result.categories_created} categor${result.categories_created === 1 ? "y" : "ies"} and ${result.saros_created} SARO row(s), tagged to ${fundClusterLabel}.`,
-        ...swalTheme,
-      });
-      onImported();
-      onOpenChange(false);
-    } catch {
-      setError("Import failed. Nothing further was written for this batch.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleExpanded = (i: number) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(i) ? next.delete(i) : next.add(i);
-      return next;
-    });
-
-  const totalSaros = categories?.reduce((s, c) => s + c.saros.length, 0) ?? 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-md">
         <DialogHeader className="border-b border-border">
-          <DialogTitle>Bulk Import NTCA Balance Categories</DialogTitle>
+          <DialogTitle>{editing ? `Edit "${editing.name}"` : "Add Category"}</DialogTitle>
         </DialogHeader>
-
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 flex flex-col gap-4">
+        <div className="px-4 py-4 flex flex-col gap-4">
           {error && (
             <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg px-4 py-2.5">{error}</div>
           )}
-          <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400 text-xs rounded-lg px-3 py-2">
-            Importing replaces the entire category/SARO grouping (across every tab, not just this one) — the "NTCA Received", "Disbursements", and "Balance" figures themselves are always computed live and are not affected.
-            Every row will be tagged <strong>{fundClusterLabel}</strong> (the tab you opened this from) so it shows up there immediately, unless a real NTCA record already tags its SARO No. to a different cluster.
+          <div className="grid grid-cols-[1fr_100px] gap-3">
+            <Field label="Category Name *">
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Cybersecurity" />
+            </Field>
+            <Field label="Order">
+              <Input type="number" value={order} onChange={(e) => setOrder(e.target.value)} />
+            </Field>
           </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Paste CSV content (including the header row — PAP, Purpose, PAP Code, Class Type, SARO No., ...)
-            </label>
-            <textarea
-              value={csvText}
-              onChange={(e) => { setCsvText(e.target.value); setCategories(null); }}
-              rows={8}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
-              placeholder="PAP,PURPOSE,PAP CODE,CLASS TYPE,SARO NO., ..."
-            />
-          </div>
-
-          <div>
-            <Button type="button" variant="outline" className="text-foreground" onClick={handlePreview} disabled={busy}>
-              {busy && !categories ? "Parsing…" : "Preview"}
-            </Button>
-          </div>
-
-          {categories && (
-            <div className="flex flex-col gap-3">
-              <p className="text-sm text-foreground">
-                Found <strong>{categories.length}</strong> categor{categories.length === 1 ? "y" : "ies"} — <strong>{totalSaros}</strong> SARO row(s) total.
-              </p>
-              {warnings.length > 0 && (
-                <div className="bg-yellow-500/10 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400 text-xs rounded-lg px-3 py-2 flex flex-col gap-1">
-                  {warnings.map((w, i) => <span key={i}>{w}</span>)}
-                </div>
-              )}
-              <div className="border border-border rounded-lg overflow-hidden max-h-[45vh] overflow-y-auto">
-                {categories.map((c, i) => (
-                  <div key={i} className="border-b border-border last:border-0">
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-accent/40 transition-colors"
-                      onClick={() => toggleExpanded(i)}
-                    >
-                      {expanded.has(i) ? <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />}
-                      <span className="text-sm font-medium text-foreground truncate">{c.name}</span>
-                      <span className="text-xs text-muted-foreground ml-auto shrink-0">{c.saros.length} SARO(s)</span>
-                    </button>
-                    {expanded.has(i) && (
-                      <div className="px-3 pb-3 bg-muted/20">
-                        <div className="border border-border rounded-lg overflow-hidden">
-                          <div className="grid grid-cols-[1fr_110px_70px] gap-2 px-3 py-1.5 bg-muted/40 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            <span>PAP / Purpose</span><span>SARO No.</span><span>Class</span>
-                          </div>
-                          {c.saros.map((s, j) => (
-                            <div key={j} className="grid grid-cols-[1fr_110px_70px] gap-2 px-3 py-1.5 border-t border-border text-xs items-center">
-                              <span className="text-foreground truncate" title={s.pap}>{s.pap || "—"}</span>
-                              <span className="text-foreground">{s.saro_no}</span>
-                              <span className="text-foreground">{s.class_type_label || "—"}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
+          {!editing && (
+            <p className="text-xs text-muted-foreground">You'll be asked to tag its first SARO No. right after this.</p>
           )}
         </div>
-
         <DialogFooter className="border-t border-border justify-end gap-2">
-          <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-          <Button onClick={handleConfirm} disabled={busy || !categories || categories.length === 0}>
-            {busy && categories ? "Importing…" : "Confirm & Replace"}
-          </Button>
+          <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Add/edit one tagged SARO No. under a category — a real standalone row,
+// not a resubmission of the whole category (see ntcaBalanceApi.createSaro/
+// updateSaro). `fundCluster` seeds the default tab tag on Add.
+// ─────────────────────────────────────────────────────────────────────────
+function SaroFormDialog({
+  open, onOpenChange, categoryId, categoryName, editing, saroList, fundCluster, onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  categoryId: number | null;
+  categoryName?: string;
+  editing: NtcaBalanceSaroReport | null;
+  saroList: ReceivedSARO[];
+  fundCluster: NtcaBalanceFundCluster;
+  onSaved: () => void;
+}) {
+  const [saroNo, setSaroNo] = useState("");
+  const [pap, setPap] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [papCode, setPapCode] = useState("");
+  const [classTypeLabel, setClassTypeLabel] = useState("");
+  const [cluster, setCluster] = useState<FundCluster | "">("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setSaroNo(editing?.saro_no ?? "");
+    setPap(editing?.pap ?? "");
+    setPurpose(editing?.purpose ?? "");
+    setPapCode(editing?.pap_code ?? "");
+    setClassTypeLabel(editing?.class_type_label ?? "");
+    setCluster(editing || fundCluster === "unclassified" ? "" : fundCluster);
+    setError(null);
+  }, [open, editing, fundCluster]);
+
+  const pickSaro = (s: ReceivedSARO) => {
+    setSaroNo(s.saro_no);
+    if (s.pap_name) setPap(s.pap_name);
+    if (s.particulars) setPurpose(s.particulars);
+    if (s.pap_code) setPapCode(s.pap_code);
+    if (s.class_type_label) setClassTypeLabel(s.class_type_label);
+  };
+
+  const handleSubmit = async () => {
+    if (!saroNo.trim()) {
+      setError("SARO No. is required.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      if (editing) {
+        await ntcaBalanceApi.updateSaro(editing.id, {
+          saro_no: saroNo.trim(), pap, purpose, pap_code: papCode, class_type_label: classTypeLabel,
+        });
+      } else {
+        if (categoryId === null) throw new Error("No category selected.");
+        await ntcaBalanceApi.createSaro({
+          category: categoryId, saro_no: saroNo.trim(), pap, purpose, pap_code: papCode,
+          class_type_label: classTypeLabel, default_fund_cluster: cluster,
+        });
+      }
+      Swal.fire({ icon: "success", title: editing ? "SARO updated" : "SARO tagged", timer: 1200, showConfirmButton: false, ...swalTheme });
+      onOpenChange(false);
+      onSaved();
+    } catch (err) {
+      setError(extractError(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader className="border-b border-border">
+          <DialogTitle>{editing ? `Edit SARO ${editing.saro_no}` : `Tag a SARO No.${categoryName ? ` — ${categoryName}` : ""}`}</DialogTitle>
+        </DialogHeader>
+        <div className="px-4 py-4 flex flex-col gap-3">
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg px-4 py-2.5">{error}</div>
+          )}
+          <Field label="SARO No. *">
+            <QuickFillSelect
+              placeholder="Pick from Received SARO list…"
+              items={saroList}
+              getLabel={(s) => `${s.saro_no} — ${s.pap_name || "(no PAP name)"}`}
+              onPick={pickSaro}
+            />
+            <Input value={saroNo} onChange={(e) => setSaroNo(e.target.value)} placeholder="SARO No." />
+          </Field>
+          <Field label="PAP">
+            <Input value={pap} onChange={(e) => setPap(e.target.value)} />
+          </Field>
+          <Field label="Purpose">
+            <Input value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="PAP Code">
+              <Input value={papCode} onChange={(e) => setPapCode(e.target.value)} />
+            </Field>
+            <Field label="Class Type">
+              <Input value={classTypeLabel} onChange={(e) => setClassTypeLabel(e.target.value)} />
+            </Field>
+          </div>
+          {!editing && (
+            <Field label="Fund Cluster (fallback until a real NTCA record tags it)">
+              <select
+                value={cluster}
+                onChange={(e) => setCluster(e.target.value as FundCluster | "")}
+                className="w-full rounded-lg border border-border bg-background px-2.5 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                <option value="">Unclassified</option>
+                {FUND_CLUSTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </Field>
+          )}
+        </div>
+        <DialogFooter className="border-t border-border justify-end gap-2">
+          <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -216,8 +288,14 @@ const NtcaBalancePage = () => {
   const [fundCluster, setFundCluster] = useState<NtcaBalanceFundCluster>("mds_regular");
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState<NtcaBalanceReport | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [saroList, setSaroList] = useState<ReceivedSARO[]>([]);
+  const [categoryFormOpen, setCategoryFormOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<NtcaBalanceCategoryReport | null>(null);
+  const [saroFormOpen, setSaroFormOpen] = useState(false);
+  const [saroFormCategoryId, setSaroFormCategoryId] = useState<number | null>(null);
+  const [saroFormCategoryName, setSaroFormCategoryName] = useState<string | undefined>(undefined);
+  const [editingSaro, setEditingSaro] = useState<NtcaBalanceSaroReport | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -232,6 +310,40 @@ const NtcaBalancePage = () => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, fundCluster]);
+
+  useEffect(() => { receivedSaroApi.list({}).then(setSaroList); }, []);
+
+  const openAddCategory = () => { setEditingCategory(null); setCategoryFormOpen(true); };
+  const openEditCategory = (cat: NtcaBalanceCategoryReport) => { setEditingCategory(cat); setCategoryFormOpen(true); };
+
+  const handleDeleteCategory = async (cat: NtcaBalanceCategoryReport) => {
+    const result = await Swal.fire({
+      icon: "warning", title: `Delete "${cat.name}"?`,
+      text: `This removes the category and all ${cat.saros.length} tagged SARO No.(s) under it. This cannot be undone.`,
+      showCancelButton: true, confirmButtonText: "Delete", confirmButtonColor: "#dc2626", ...swalTheme,
+    });
+    if (!result.isConfirmed) return;
+    await ntcaBalanceApi.remove(cat.id);
+    load();
+  };
+
+  const openAddSaro = (categoryId: number, categoryName?: string) => {
+    setSaroFormCategoryId(categoryId); setSaroFormCategoryName(categoryName); setEditingSaro(null); setSaroFormOpen(true);
+  };
+  const openEditSaro = (categoryId: number, categoryName: string, saro: NtcaBalanceSaroReport) => {
+    setSaroFormCategoryId(categoryId); setSaroFormCategoryName(categoryName); setEditingSaro(saro); setSaroFormOpen(true);
+  };
+
+  const handleDeleteSaro = async (saro: NtcaBalanceSaroReport) => {
+    const result = await Swal.fire({
+      icon: "warning", title: `Untag SARO ${saro.saro_no}?`,
+      text: "This removes it from the category. This cannot be undone.",
+      showCancelButton: true, confirmButtonText: "Delete", confirmButtonColor: "#dc2626", ...swalTheme,
+    });
+    if (!result.isConfirmed) return;
+    await ntcaBalanceApi.removeSaro(saro.id);
+    load();
+  };
 
   const availableYears = useMemo(() => {
     const years = new Set<number>();
@@ -277,7 +389,7 @@ const NtcaBalancePage = () => {
     const result = await Swal.fire({
       icon: "warning",
       title: "Delete the entire NTCA Balance grouping?",
-      html: "This permanently deletes every category and SARO row — across every tab (MDS Regular/Special/Unclassified) and every year, not just what's currently shown. The underlying NTCA/Disbursement figures themselves aren't touched, but you'll need to re-import the category grouping from scratch. This cannot be undone.",
+      html: "This permanently deletes every category and SARO row — across every tab (MDS Regular/Special/Unclassified) and every year, not just what's currently shown. The underlying NTCA/Disbursement figures themselves aren't touched. This cannot be undone.",
       showCancelButton: true, confirmButtonText: "Delete all", confirmButtonColor: "#dc2626", ...swalTheme,
     });
     if (!result.isConfirmed) return;
@@ -311,11 +423,11 @@ const NtcaBalancePage = () => {
           {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
         <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-2" /> Bulk Import Categories
-          </Button>
           <Button variant="outline" className="text-foreground" onClick={handleDeleteAll}>
             <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          </Button>
+          <Button onClick={openAddCategory}>
+            <Plus className="w-4 h-4 mr-2" /> Add Category
           </Button>
         </div>
       </div>
@@ -327,12 +439,12 @@ const NtcaBalancePage = () => {
       ) : !report || report.categories.length === 0 ? (
         <div className="bg-card border border-border rounded-xl px-5 py-10 text-center text-sm text-muted-foreground">
           No categories with data in {FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label} for {year} yet.
-          Use "Bulk Import Categories" to load the PAP / SARO grouping from your working spreadsheet.
+          Click "Add Category" to create one, then tag its SARO No.(s).
         </div>
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <div className="min-w-[1995px]">
+            <div className="min-w-[2100px]">
               <div
                 className="grid gap-x-2 px-4 border-b border-border bg-muted/40 text-muted-foreground"
                 style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS, gridTemplateRows: "auto auto" }}
@@ -349,6 +461,7 @@ const NtcaBalancePage = () => {
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>PAP</span>
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>Purpose</span>
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>SARO No.</span>
+                <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>Actions</span>
 
                 {/* Row 1 — group labels, each spanning its 4 quarter columns + total */}
                 <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: "span 5", gridRow: "1" }}>NTCA Received</span>
@@ -385,6 +498,17 @@ const NtcaBalancePage = () => {
                     </span>
                     <span className="min-w-0"><CategoryChip label={cat.name} /></span>
                     <span /><span />
+                    <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => openAddSaro(cat.id, cat.name)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Tag a SARO">
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => openEditCategory(cat)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit category">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDeleteCategory(cat)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete category">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
                     {cat.received_quarters.map((v, i) => (
                       <span key={i} className="text-xs font-medium text-foreground text-right">{formatMoney(v)}</span>
                     ))}
@@ -410,6 +534,14 @@ const NtcaBalancePage = () => {
                       <span className="text-foreground truncate pl-2" title={s.pap}>{s.pap || "—"}</span>
                       <span className="text-muted-foreground truncate" title={s.purpose}>{s.purpose || "—"}</span>
                       <span className="text-muted-foreground truncate">{s.saro_no}</span>
+                      <span className="flex items-center gap-0.5">
+                        <button onClick={() => openEditSaro(cat.id, cat.name, s)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit SARO">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDeleteSaro(s)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Untag SARO">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
                       {s.received_quarters.map((v, i) => (
                         <span key={i} className="text-foreground text-right">{formatMoney(v)}</span>
                       ))}
@@ -432,7 +564,7 @@ const NtcaBalancePage = () => {
                 className="grid gap-x-2 px-4 py-3 bg-muted/40 items-center"
                 style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}
               >
-                <span /><span /><span className="text-sm font-bold text-foreground">Total</span><span /><span /><span /><span />
+                <span /><span /><span className="text-sm font-bold text-foreground">Total</span><span /><span /><span />
                 {report.totals.received_quarters.map((v, i) => (
                   <span key={i} className="text-xs font-bold text-foreground text-right">{formatMoney(v)}</span>
                 ))}
@@ -451,9 +583,14 @@ const NtcaBalancePage = () => {
         </div>
       )}
 
-      <NtcaBalanceImportDialog
-        open={importOpen} onOpenChange={setImportOpen} onImported={load}
-        fundCluster={fundCluster} fundClusterLabel={FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label ?? fundCluster}
+      <CategoryFormDialog
+        open={categoryFormOpen} onOpenChange={setCategoryFormOpen} editing={editingCategory}
+        nextOrder={report?.categories.length ?? 0} onSaved={load}
+        onCreated={openAddSaro}
+      />
+      <SaroFormDialog
+        open={saroFormOpen} onOpenChange={setSaroFormOpen} categoryId={saroFormCategoryId} categoryName={saroFormCategoryName}
+        editing={editingSaro} saroList={saroList} fundCluster={fundCluster} onSaved={load}
       />
     </AdminLayout>
   );

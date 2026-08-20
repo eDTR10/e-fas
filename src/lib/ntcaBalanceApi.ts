@@ -4,6 +4,7 @@ import { FundCluster, FUND_CLUSTER_OPTIONS } from "./ntcaApi";
 export { FUND_CLUSTER_OPTIONS };
 
 const BASE = "/api/v1/saro/ntca-balance-categories";
+const SARO_BASE = "/api/v1/saro/ntca-balance-category-saros";
 
 // "unclassified" isn't a real FUND_CLUSTER_CHOICES value — it's the report's
 // own bucket for a SARO whose linked NTCA(s) have no fund_cluster tagged
@@ -34,6 +35,29 @@ export interface NtcaBalanceCategoryPayload {
   name: string;
   order: number;
   saros: (Omit<NtcaBalanceCategorySaro, "id"> & { id?: number })[];
+}
+
+// A plain rename/reorder edit — deliberately omits `saros` entirely (as
+// opposed to NtcaBalanceCategoryPayload, which always carries the full
+// list) so PATCHing it never touches that category's tagged SARO rows.
+// See NtcaBalanceCategorySerializer.update in the backend.
+export interface NtcaBalanceCategoryMetaPayload {
+  name: string;
+  order: number;
+}
+
+// Standalone per-row payload — create/edit one tagged SARO No. without
+// resubmitting its category's whole list (see ntcaBalanceApi.createSaro/
+// updateSaro/removeSaro, backed by NtcaBalanceCategorySaroViewSet).
+export interface NtcaBalanceCategorySaroPayload {
+  category: number;
+  saro_no: string;
+  pap?: string;
+  purpose?: string;
+  pap_code?: string;
+  class_type_label?: string;
+  order?: number;
+  default_fund_cluster?: FundCluster | "";
 }
 
 // ── Live-computed report shape (returned by the `report` action — never stored) ──
@@ -79,30 +103,6 @@ export interface NtcaBalanceReport {
   };
 }
 
-// ── Bulk import (paste CSV, preview, confirm — replaces the whole grouping) ──
-export interface NtcaBalanceImportSaroRow {
-  saro_no: string;
-  pap: string;
-  purpose: string;
-  pap_code: string;
-  class_type_label: string;
-  order: number;
-}
-
-export interface NtcaBalanceImportCategoryRow {
-  name: string;
-  order: number;
-  saros: NtcaBalanceImportSaroRow[];
-}
-
-export interface NtcaBalanceImportResult {
-  dry_run: boolean;
-  categories_created: number;
-  saros_created: number;
-  categories: NtcaBalanceImportCategoryRow[];
-  warnings: string[];
-}
-
 export const ntcaBalanceApi = {
   list: async (): Promise<NtcaBalanceCategory[]> => {
     const { data } = await api.get<NtcaBalanceCategory[]>(`${BASE}/`);
@@ -114,13 +114,32 @@ export const ntcaBalanceApi = {
     return data;
   },
 
-  update: async (id: number, payload: NtcaBalanceCategoryPayload): Promise<NtcaBalanceCategory> => {
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`${BASE}/${id}/`);
+  },
+
+  // Rename/reorder a category only — never touches its tagged SARO rows
+  // (see NtcaBalanceCategoryMetaPayload).
+  updateMeta: async (id: number, payload: NtcaBalanceCategoryMetaPayload): Promise<NtcaBalanceCategory> => {
     const { data } = await api.patch<NtcaBalanceCategory>(`${BASE}/${id}/`, payload);
     return data;
   },
 
-  remove: async (id: number): Promise<void> => {
-    await api.delete(`${BASE}/${id}/`);
+  // Standalone per-row SARO CRUD — add/edit/remove one tagged SARO No.
+  // under a category without touching its siblings or losing their ids
+  // (see NtcaBalanceCategorySaroViewSet / NtcaBalanceCategorySaroPayload).
+  createSaro: async (payload: NtcaBalanceCategorySaroPayload): Promise<NtcaBalanceCategorySaro> => {
+    const { data } = await api.post<NtcaBalanceCategorySaro>(`${SARO_BASE}/`, payload);
+    return data;
+  },
+
+  updateSaro: async (id: number, payload: Partial<NtcaBalanceCategorySaroPayload>): Promise<NtcaBalanceCategorySaro> => {
+    const { data } = await api.patch<NtcaBalanceCategorySaro>(`${SARO_BASE}/${id}/`, payload);
+    return data;
+  },
+
+  removeSaro: async (id: number): Promise<void> => {
+    await api.delete(`${SARO_BASE}/${id}/`);
   },
 
   // Deletes specific SARO rows (report leaf rows) by id — the parent
@@ -133,27 +152,6 @@ export const ntcaBalanceApi = {
   report: async (year: number, fundCluster: NtcaBalanceFundCluster): Promise<NtcaBalanceReport> => {
     const { data } = await api.get<NtcaBalanceReport>(`${BASE}/report/`, {
       params: { year, fund_cluster: fundCluster },
-    });
-    return data;
-  },
-
-  // fundCluster: tags every imported SARO row with the tab the import was
-  // triggered from (as a fallback classification until a real NTCA record
-  // exists for it) — pass "unclassified" or omit to leave rows untagged.
-  previewImport: async (csvText: string, fundCluster?: NtcaBalanceFundCluster): Promise<NtcaBalanceImportResult> => {
-    const { data } = await api.post<NtcaBalanceImportResult>(`${BASE}/bulk_import/`, {
-      csv_text: csvText,
-      dry_run: "true",
-      fund_cluster: fundCluster,
-    });
-    return data;
-  },
-
-  confirmImport: async (categories: NtcaBalanceImportCategoryRow[], fundCluster?: NtcaBalanceFundCluster): Promise<NtcaBalanceImportResult> => {
-    const { data } = await api.post<NtcaBalanceImportResult>(`${BASE}/bulk_import/`, {
-      categories,
-      dry_run: "false",
-      fund_cluster: fundCluster,
     });
     return data;
   },

@@ -3,7 +3,6 @@ import { Save } from "lucide-react";
 import AdminLayout from "./AdminLayout";
 import ReferenceDataSettings from "./ReferenceDataSettings";
 import AdaCounterSettings from "./AdaCounterSettings";
-import NtcaBalanceCategorySettings from "./NtcaBalanceCategorySettings";
 
 const Setting = () => {
   const [loading, setLoading] = useState(true);
@@ -109,9 +108,6 @@ const Setting = () => {
 
         {/* ── ADA Counters (Custom Disbursement ledger) ──────────────── */}
         <AdaCounterSettings />
-
-        {/* ── NTCA Balance Categories (SARO tagging per report section) ── */}
-        <NtcaBalanceCategorySettings />
 
         {/* ── Danger Zone ──────────────────────────────────────────── */}
         <section className="bg-card border border-destructive/30 rounded-xl p-6">

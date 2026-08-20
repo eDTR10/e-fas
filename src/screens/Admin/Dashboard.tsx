@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileText, Landmark, PiggyBank, Link2, Link2Off, Search, Scale, Banknote } from "lucide-react";
+import { FileText, Landmark, PiggyBank, Link2, Link2Off, Search, Scale, Banknote, Wallet } from "lucide-react";
 import AdminLayout from "./AdminLayout";
 import { StatCardsSkeleton } from "./Skeleton";
 import MonthlyBarChart from "../../components/charts/MonthlyBarChart";
@@ -10,10 +10,11 @@ import PapPerformancePanel from "../../components/admin/PapPerformancePanel";
 import DateRangeFilterBar from "../../components/filters/DateRangeFilterBar";
 import { useDateRangeFilter } from "../../lib/useDateRangeFilter";
 import { receivedSaroApi, ReceivedSARO } from "../../lib/receivedSaroApi";
-import { ntcaApi, NTCA } from "../../lib/ntcaApi";
+import { ntcaApi, NTCA, FundCluster, FUND_CLUSTER_OPTIONS } from "../../lib/ntcaApi";
 import { ntcaDisbursementApi, NtcaDisbursement } from "../../lib/ntcaDisbursementApi";
 import { disbursementApi, Disbursement } from "../../lib/disbursementApi";
 import { raodApi, raodOrsKey, SARO } from "../../lib/raodApi";
+import { papApi, PAP } from "../../lib/referenceDataApi";
 import { useNavigate } from "react-router-dom";
 
 const formatCompactMoney = (n: number): string => {
@@ -55,27 +56,31 @@ const Dashboard = () => {
   const [customDisbursements, setCustomDisbursements] = useState<NtcaDisbursement[]>([]);
   const [disbursementTrackerRows, setDisbursementTrackerRows] = useState<Disbursement[]>([]);
   const [raodList, setRaodList] = useState<SARO[]>([]);
+  const [papList, setPapList] = useState<PAP[]>([]);
 
   // ── Filters ──────────────────────────────────────────────────────────
   const [papFilter, setPapFilter] = useState("");
   const [saroFilter, setSaroFilter] = useState("");
+  const [clusterFilter, setClusterFilter] = useState<FundCluster | "">("");
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        const [saros, ntcas, customDisb, disbTracker, raods] = await Promise.all([
+        const [saros, ntcas, customDisb, disbTracker, raods, paps] = await Promise.all([
           receivedSaroApi.list({}),
           ntcaApi.list({}),
           ntcaDisbursementApi.list({}),
           disbursementApi.list({}),
           raodApi.list({}),
+          papApi.list(),
         ]);
         setSaroList(saros);
         setNtcaList(ntcas);
         setCustomDisbursements(customDisb);
         setDisbursementTrackerRows(disbTracker);
         setRaodList(raods);
+        setPapList(paps);
       } finally {
         setLoading(false);
       }
@@ -114,6 +119,18 @@ const Dashboard = () => {
     return map;
   }, [raodList]);
 
+  // SARO/RAOD/Disbursement Tracker records carry a PAP Code but no
+  // fund_cluster field of their own — a PAP is optionally tagged with one
+  // (see PAP.fund_cluster in referenceDataApi.ts), and NTCA/Custom
+  // Disbursement rows auto-inherit it from there, so this map is how the
+  // Cluster filter reaches every other dataset too. A PAP left untagged
+  // simply won't match any specific cluster, same as an untagged NTCA.
+  const papFundClusterByCode = useMemo(() => {
+    const map = new Map<string, FundCluster>();
+    papList.forEach((p) => { if (p.fund_cluster) map.set(p.code, p.fund_cluster); });
+    return map;
+  }, [papList]);
+
   const {
     year, quarter, dateFrom, dateTo,
     setYear, applyQuarter, setDateFrom, setDateTo,
@@ -121,42 +138,60 @@ const Dashboard = () => {
   } = useDateRangeFilter(availableYears);
 
   const clearFilters = () => {
-    clearDateFilters(); setPapFilter(""); setSaroFilter("");
+    clearDateFilters(); setPapFilter(""); setSaroFilter(""); setClusterFilter("");
   };
 
   const filteredSaro = useMemo(() => saroList.filter((s) =>
     inRange(s.date_received) &&
     (!papFilter || s.pap_code === papFilter) &&
-    (!saroFilter || s.saro_no === saroFilter)
-  ), [saroList, inRange, papFilter, saroFilter]);
+    (!saroFilter || s.saro_no === saroFilter) &&
+    (!clusterFilter || papFundClusterByCode.get(s.pap_code) === clusterFilter)
+  ), [saroList, inRange, papFilter, saroFilter, clusterFilter, papFundClusterByCode]);
 
   const filteredNtca = useMemo(() => ntcaList.filter((n) =>
     inRange(n.date_of_ntca) &&
     (!papFilter || n.pap_code === papFilter) &&
-    (!saroFilter || n.saro_no === saroFilter)
-  ), [ntcaList, inRange, papFilter, saroFilter]);
+    (!saroFilter || n.saro_no === saroFilter) &&
+    (!clusterFilter || n.fund_cluster === clusterFilter)
+  ), [ntcaList, inRange, papFilter, saroFilter, clusterFilter]);
 
   const filteredCustomDisbursements = useMemo(() => customDisbursements.filter((d) =>
     inRange(d.date) &&
-    (!papFilter || d.ntca_detail.pap_code === papFilter) &&
-    (!saroFilter || d.ntca_detail.saro_no === saroFilter)
-  ), [customDisbursements, inRange, papFilter, saroFilter]);
+    // An advance disbursement (no ntca_detail yet — see NtcaDisbursement.ntca)
+    // has no PAP/SARO to match against, so it drops out once either filter
+    // is active rather than crashing on a null lookup. It still carries its
+    // own fund_cluster though (chosen at import/add time), so the Cluster
+    // filter alone doesn't drop it the way PAP/SARO do.
+    (!papFilter || d.ntca_detail?.pap_code === papFilter) &&
+    (!saroFilter || d.ntca_detail?.saro_no === saroFilter) &&
+    (!clusterFilter || d.fund_cluster === clusterFilter)
+  ), [customDisbursements, inRange, papFilter, saroFilter, clusterFilter]);
 
-  const filteredDisbursementTracker = useMemo(() => disbursementTrackerRows.filter((d) =>
-    (!d.date || inRange(d.date)) &&
-    (!papFilter || papCodeByOrsNo.get(d.ors_no.trim().toLowerCase()) === papFilter)
-  ), [disbursementTrackerRows, inRange, papFilter, papCodeByOrsNo]);
+  const filteredDisbursementTracker = useMemo(() => disbursementTrackerRows.filter((d) => {
+    const papCode = papCodeByOrsNo.get(d.ors_no.trim().toLowerCase());
+    return (!d.date || inRange(d.date)) &&
+      (!papFilter || papCode === papFilter) &&
+      (!clusterFilter || (papCode !== undefined && papFundClusterByCode.get(papCode) === clusterFilter));
+  }), [disbursementTrackerRows, inRange, papFilter, clusterFilter, papCodeByOrsNo, papFundClusterByCode]);
 
   // RAOD dates use date_of_saro (same field RaodPage.tsx filters by).
   const filteredRaod = useMemo(() => raodList.filter((r) =>
     (!r.date_of_saro || inRange(r.date_of_saro)) &&
     (!papFilter || r.pap_code === papFilter) &&
-    (!saroFilter || r.saro_no === saroFilter)
-  ), [raodList, inRange, papFilter, saroFilter]);
+    (!saroFilter || r.saro_no === saroFilter) &&
+    (!clusterFilter || papFundClusterByCode.get(r.pap_code) === clusterFilter)
+  ), [raodList, inRange, papFilter, saroFilter, clusterFilter, papFundClusterByCode]);
 
   const totalSaroAmount = filteredSaro.reduce((s, x) => s + Number(x.amount), 0);
   const totalNtcaAmount = filteredNtca.reduce((s, x) => s + Number(x.amount), 0);
+  // Sums every Cashiering (Custom Disbursement) row for the selected
+  // filters, including "advance" disbursements paid out before their NCA
+  // was received/logged (ntca_detail === null) — those still have a real
+  // amount and belong in this total, they just have nothing to link to yet.
   const totalCustomDisbursedAmount = filteredCustomDisbursements.reduce((s, x) => s + Number(x.amount), 0);
+  const advanceCustomDisbursedAmount = filteredCustomDisbursements
+    .filter((x) => !x.ntca_detail)
+    .reduce((s, x) => s + Number(x.amount), 0);
   // Disbursement Tracker's Net column is left blank until populated from
   // elsewhere (see models.py) — treated as 0 here until then.
   const totalTrackerNetDisbursed = filteredDisbursementTracker.reduce((s, x) => s + Number(x.net || 0), 0);
@@ -195,9 +230,24 @@ const Dashboard = () => {
       .sort((a, b) => b.released - a.released);
   }, [filteredSaro, filteredRaod, papOptions]);
 
-  const stats = [
+  const stats: {
+    title: string;
+    value: number;
+    count: number | null;
+    icon: JSX.Element;
+    caption?: string;
+    captionTone?: "warning";
+  }[] = [
     { title: "Total SARO", value: totalSaroAmount, count: filteredSaro.length, icon: <FileText className="w-5 h-5" /> },
-    { title: "Total NTCA", value: totalNtcaAmount, count: filteredNtca.length, icon: <Landmark className="w-5 h-5" /> },
+    { title: "Total Received NTCA (Accounting)", value: totalNtcaAmount, count: filteredNtca.length, icon: <Landmark className="w-5 h-5" /> },
+    {
+      title: "NTCA Disbursed (Cashiering)",
+      value: totalCustomDisbursedAmount,
+      count: filteredCustomDisbursements.length,
+      icon: <Wallet className="w-5 h-5" />,
+      caption: advanceCustomDisbursedAmount > 0 ? `incl. ${formatCompactMoney(advanceCustomDisbursedAmount)} advance (no NTCA yet)` : undefined,
+      captionTone: "warning",
+    },
     { title: "Total Disbursed (Gross)", value: totalGrossDisbursed, count: filteredRaod.length, icon: <Scale className="w-5 h-5" /> },
     { title: "Total Disbursed (Net)", value: totalNetDisbursed, count: filteredDisbursementTracker.length, icon: <Banknote className="w-5 h-5" /> },
     { title: "Available Balance", value: availableBalance, count: null, icon: <PiggyBank className="w-5 h-5" /> },
@@ -320,8 +370,17 @@ const Dashboard = () => {
         onDateFromChange={setDateFrom}
         onDateToChange={setDateTo}
         onClear={clearFilters}
-        hasActiveFilters={hasActiveDateFilter || !!papFilter || !!saroFilter}
+        hasActiveFilters={hasActiveDateFilter || !!papFilter || !!saroFilter || !!clusterFilter}
       >
+        <select
+          value={clusterFilter}
+          onChange={(e) => setClusterFilter(e.target.value as FundCluster | "")}
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+        >
+          <option value="">All Clusters</option>
+          {FUND_CLUSTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+
         <select
           value={saroFilter}
           onChange={(e) => setSaroFilter(e.target.value)}
@@ -345,7 +404,7 @@ const Dashboard = () => {
       {loading ? (
         <StatCardsSkeleton />
       ) : (
-        <div className="grid grid-cols-5 gap-4 mb-6 lg:grid-cols-2 sm:grid-cols-1">
+        <div className="grid grid-cols-3 gap-4 mb-6 lg:grid-cols-2 sm:grid-cols-1">
           {stats.map((stat) => (
             <div
               key={stat.title}
@@ -355,9 +414,10 @@ const Dashboard = () => {
                   case "Total SARO":
                     navigate("/admin/budget/received-saro");
                     break;
-                  case "Total NTCA":
+                  case "Total Received NTCA (Accounting)":
                     navigate("/admin/accounting/received-ntca");
                     break;
+                  case "NTCA Disbursed (Cashiering)":
                   case "Available Balance":
                     navigate("/admin/cashier/custom-disbursement");
                     break;
@@ -378,7 +438,11 @@ const Dashboard = () => {
                 <span className="p-2 rounded-lg bg-primary/10 text-primary">{stat.icon}</span>
               </div>
               <p className="text-2xl font-bold text-foreground">{formatCompactMoney(stat.value)}</p>
-              {stat.count !== null && <p className="text-xs font-medium text-muted-foreground">{stat.count} record{stat.count === 1 ? "" : "s"}</p>}
+              {stat.caption ? (
+                <p className={`text-xs font-medium ${stat.captionTone === "warning" ? "text-destructive" : "text-muted-foreground"}`}>{stat.caption}</p>
+              ) : stat.count !== null && (
+                <p className="text-xs font-medium text-muted-foreground">{stat.count} record{stat.count === 1 ? "" : "s"}</p>
+              )}
             </div>
           ))}
         </div>
@@ -392,7 +456,7 @@ const Dashboard = () => {
           add up to exactly the SARO figure shown at top, even if total NTCA
           receipts happen to exceed it. */}
       {!loading && (
-        <div className="grid grid-cols-1 gap-4 mb-6">
+        <div className="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-1">
           <ShareBarChart
             title="NTCA Received vs Not Received"
             subtitle="Share of Total SARO covered by an NTCA so far, for the selected filters"
@@ -407,6 +471,26 @@ const Dashboard = () => {
             formatValue={formatCompactMoney}
             totalLabel="Total SARO"
             totalValue={totalSaroAmount}
+          />
+          <ShareBarChart
+            title="NTCA Received vs NTCA Disbursed"
+            subtitle="Share of Total NTCA Received already disbursed via Cashiering (including disbursements with no NTCA yet) vs what's still remaining"
+            series={[
+              { key: "disbursed", label: "NTCA Disbursed", colorIndex: 2 },
+              { key: "remaining", label: "Remaining NTCA Balance", colorIndex: 0 },
+            ]}
+            data={{
+              // Not capped at totalNtcaAmount, unlike the SARO bar above —
+              // an advance disbursement (no NTCA yet) can push disbursed
+              // past what's actually been received, and that overdraft
+              // should stay visible in the labeled figure rather than being
+              // silently clipped to make the two segments add up neatly.
+              disbursed: totalCustomDisbursedAmount,
+              remaining: Math.max(totalNtcaAmount - totalCustomDisbursedAmount, 0),
+            }}
+            formatValue={formatCompactMoney}
+            totalLabel="Total NTCA Received"
+            totalValue={totalNtcaAmount}
           />
         </div>
       )}

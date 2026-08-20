@@ -9,6 +9,8 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
+  Settings2,
   Trash2,
   Wallet,
 } from "lucide-react";
@@ -40,6 +42,9 @@ import {
 import KpiStrip from "../../components/ui/kpi-strip";
 import { NtcaLedgerPasteImportDialog } from "../../components/admin/NtcaLedgerPasteImportDialog";
 import { NtcaLedgerTrackerDialog } from "../../components/admin/NtcaLedgerTrackerDialog";
+import { AdaDisbursedBreakdownDialog } from "../../components/admin/AdaDisbursedBreakdownDialog";
+import { CustomDisbursementSheetSetupDialog } from "../../components/admin/CustomDisbursementSheetSetupDialog";
+import { NtcaLedgerSheetSyncDialog } from "../../components/admin/NtcaLedgerSheetSyncDialog";
 
 const swalTheme = {
   background: "hsl(var(--background))",
@@ -182,7 +187,7 @@ function DisbursementDialog({
       .reduce((sum, n) => sum + Number(n.amount), 0);
     const used = disbursements
       .filter((entry) =>
-        siblingIds.has(entry.ntca) &&
+        entry.ntca !== null && siblingIds.has(entry.ntca) &&
         entry.id !== editing?.id &&
         entry.date <= targetDate)
       .reduce((sum, entry) => sum + Number(entry.amount), 0);
@@ -410,6 +415,9 @@ const CustomDisbursementPage = () => {
   const [trackerOpen, setTrackerOpen] = useState(false);
   const [untracking, setUntracking] = useState<number | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  const [sheetSyncOpen, setSheetSyncOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -475,6 +483,10 @@ const CustomDisbursementPage = () => {
   const clusterDisbursements = useMemo(
     () => disbursements.filter((entry) => {
       if (entry.fund_cluster !== selectedCluster) return false;
+      // An advance disbursement (no `ntca` — see the model docstring) has no
+      // NCA group to be gated by; it's always shown, flagged red, until it
+      // gets linked to a real NTCA record later.
+      if (entry.ntca === null) return true;
       const ntca = ntcas.find((n) => n.id === entry.ntca);
       if (!ntca) return false;
       return trackedNcaKeys.has(ntca.nca_no || `__id_${ntca.id}`);
@@ -498,7 +510,7 @@ const CustomDisbursementPage = () => {
           a.date_of_ntca.localeCompare(b.date_of_ntca) || a.id - b.id);
         const representative = tranches[0];
         const trancheIds = new Set(tranches.map((t) => t.id));
-        const groupEntries = disbursements.filter((entry) => trancheIds.has(entry.ntca));
+        const groupEntries = disbursements.filter((entry) => entry.ntca !== null && trancheIds.has(entry.ntca));
 
         const previousDisbursements = groupEntries
           .filter((entry) => entry.date < start)
@@ -542,7 +554,7 @@ const CustomDisbursementPage = () => {
     [clusterDisbursements, start, next],
   );
 
-  const totals = monthlyRows.reduce(
+  const rollForwardTotals = monthlyRows.reduce(
     (result, row) => ({
       opening: result.opening + row.opening,
       received: result.received + row.received,
@@ -551,6 +563,22 @@ const CustomDisbursementPage = () => {
     }),
     { opening: 0, received: 0, disbursed: 0, closing: 0 },
   );
+
+  // Advance disbursements (no `ntca` yet) draw down real money that isn't
+  // attributable to any NCA group, so they never appear in monthlyRows —
+  // folded in here so "ADA disbursed"/"Balance forwarded" still reflect
+  // every peso actually spent this month, not just what's reconciled.
+  const advanceMonthlyDisbursements = useMemo(
+    () => monthlyDisbursements.filter((entry) => entry.ntca === null),
+    [monthlyDisbursements],
+  );
+  const advanceDisbursedThisMonth = advanceMonthlyDisbursements.reduce((sum, entry) => sum + Number(entry.amount), 0);
+
+  const totals = {
+    ...rollForwardTotals,
+    disbursed: rollForwardTotals.disbursed + advanceDisbursedThisMonth,
+    closing: rollForwardTotals.closing - advanceDisbursedThisMonth,
+  };
 
   const monthCounts = useMemo(
     () => MONTHS.map((_, month) => {
@@ -574,7 +602,7 @@ const CustomDisbursementPage = () => {
       .reduce((sum, n) => sum + Number(n.amount), 0);
     const spent = disbursements
       .filter((row) =>
-        siblingIds.has(row.ntca) &&
+        row.ntca !== null && siblingIds.has(row.ntca) &&
         (row.date < entry.date || (row.date === entry.date && row.id <= entry.id)))
       .reduce((sum, row) => sum + Number(row.amount), 0);
     return pooled - spent;
@@ -628,7 +656,7 @@ const CustomDisbursementPage = () => {
 
   const untrackNtcaGroup = async (row: MonthlyNtcaRow) => {
     const trancheIds = new Set(row.tranches.map((t) => t.id));
-    const childDisbursements = disbursements.filter((entry) => trancheIds.has(entry.ntca));
+    const childDisbursements = disbursements.filter((entry) => entry.ntca !== null && trancheIds.has(entry.ntca));
     const result = await Swal.fire({
       icon: "warning",
       title: `Remove NCA ${row.ncaNo} from this ledger?`,
@@ -730,6 +758,14 @@ const CustomDisbursementPage = () => {
           <ClipboardPaste className="mr-2 h-4 w-4" />
           Paste Import
         </Button>
+        <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)}>
+          <Settings2 className="mr-2 h-4 w-4" />
+          Sheet Setup
+        </Button>
+        <Button variant="outline" className="text-foreground" onClick={() => setSheetSyncOpen(true)}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Sync Sheets
+        </Button>
         <Button onClick={addDisbursement}>
           <Plus className="mr-2 h-4 w-4" />
           Add disbursement
@@ -747,8 +783,12 @@ const CustomDisbursementPage = () => {
           {
             title: "ADA disbursed",
             value: formatMoney(totals.disbursed),
-            caption: `${monthlyDisbursements.length} ADA entr${monthlyDisbursements.length === 1 ? "y" : "ies"}`,
+            caption: advanceDisbursedThisMonth > 0
+              ? `Incl. ${formatMoney(advanceDisbursedThisMonth)} not yet in NTCA Received`
+              : `${monthlyDisbursements.length} ADA entr${monthlyDisbursements.length === 1 ? "y" : "ies"}`,
+            captionTone: advanceDisbursedThisMonth > 0 ? "warning" : "muted",
             icon: FileText,
+            onClick: () => setBreakdownOpen(true),
           },
           {
             title: "Balance forwarded",
@@ -864,20 +904,29 @@ const CustomDisbursementPage = () => {
                   {monthlyDisbursements.map((entry) => (
                     <div
                       key={entry.id}
-                      className="grid grid-cols-[105px_90px_145px_1fr_130px_130px_70px] gap-3 border-b border-border px-5 py-3 text-sm last:border-0"
+                      className={`grid grid-cols-[105px_90px_145px_1fr_130px_130px_70px] gap-3 border-b border-border px-5 py-3 text-sm last:border-0 ${!entry.ntca_detail ? "bg-destructive/5" : ""}`}
                     >
                       <span className="text-foreground">{formatDate(entry.date)}</span>
                       <span className="font-semibold text-primary">#{entry.ada_no || "—"}</span>
                       <div className="min-w-0">
-                        <p className="truncate text-foreground">{entry.ntca_detail.ntca_no}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{entry.ntca_detail.nca_no || entry.ntca_detail.saro_no}</p>
+                        {entry.ntca_detail ? (
+                          <>
+                            <p className="truncate text-foreground">{entry.ntca_detail.ntca_no}</p>
+                            <p className="truncate text-[11px] text-muted-foreground">{entry.ntca_detail.nca_no || entry.ntca_detail.saro_no}</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="truncate font-medium text-destructive">NCA {entry.raw_ntca_no || "—"}</p>
+                            <p className="truncate text-[11px] text-destructive/80">Not yet in NTCA Received</p>
+                          </>
+                        )}
                       </div>
                       <span className="truncate text-foreground">{entry.particulars || "—"}</span>
                       <span className="text-right font-medium tabular-nums text-amber-600 dark:text-amber-400">
                         {formatMoney(entry.amount)}
                       </span>
                       <span className="text-right font-semibold tabular-nums text-foreground">
-                        {formatMoney(balanceAfterEntry(entry))}
+                        {entry.ntca_detail ? formatMoney(balanceAfterEntry(entry)) : "—"}
                       </span>
                       <div className="flex justify-end gap-1">
                         <button
@@ -924,7 +973,16 @@ const CustomDisbursementPage = () => {
         ntcas={allClusterNtcas}
         fundCluster={selectedCluster}
         existingDisbursements={disbursements}
-        onImported={load}
+        onImported={async (year, month) => {
+          // Rows always land under their own date, never under whatever tab
+          // was open — but leaving the tab where it was reads as "it went to
+          // the wrong month" even when it didn't, so follow the data here.
+          if (year !== undefined && month !== undefined) {
+            setSelectedYear(year);
+            setSelectedMonth(month);
+          }
+          await load();
+        }}
       />
       <NtcaLedgerTrackerDialog
         open={trackerOpen}
@@ -932,6 +990,30 @@ const CustomDisbursementPage = () => {
         ntcas={untrackedClusterNtcas}
         onChanged={load}
         viewingMonthEnd={next}
+      />
+      <AdaDisbursedBreakdownDialog
+        open={breakdownOpen}
+        onOpenChange={setBreakdownOpen}
+        entries={monthlyDisbursements}
+        periodLabel={`${MONTHS[selectedMonth]} ${selectedYear} · ${clusterLabel}`}
+      />
+      <CustomDisbursementSheetSetupDialog
+        open={sheetSetupOpen}
+        onOpenChange={setSheetSetupOpen}
+      />
+      <NtcaLedgerSheetSyncDialog
+        open={sheetSyncOpen}
+        onOpenChange={setSheetSyncOpen}
+        fundCluster={selectedCluster}
+        ntcas={allClusterNtcas}
+        existingDisbursements={disbursements}
+        onImported={async (year, month) => {
+          if (year !== undefined && month !== undefined) {
+            setSelectedYear(year);
+            setSelectedMonth(month);
+          }
+          await load();
+        }}
       />
     </AdminLayout>
   );

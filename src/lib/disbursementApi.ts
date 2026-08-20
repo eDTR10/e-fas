@@ -5,8 +5,8 @@ const BASE = "/api/v1/saro/disbursements";
 // Mirrors the "RAOD Working File - DV" spreadsheet columns directly. Gross
 // is always looked up server-side from RAOD (matching ORS No.), never taken
 // from the sheet. Net, Date Paid, ADA/Check, and NCA are read from the
-// sheet when present (and backfilled onto an already-imported row on
-// re-sync) — see saro/importers.py.
+// sheet when present. A re-sync refreshes matching rows from the source —
+// see saro/importers.py.
 export interface Disbursement {
   id: number;
   routing_slip_no: string;
