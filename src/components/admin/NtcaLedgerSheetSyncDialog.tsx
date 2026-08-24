@@ -82,6 +82,7 @@ export function NtcaLedgerSheetSyncDialog({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [tabResults, setTabResults] = useState<TabResult[] | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [importing, setImporting] = useState(false);
@@ -91,13 +92,24 @@ export function NtcaLedgerSheetSyncDialog({
   const load = async () => {
     setLoading(true);
     setError(null);
+    setSourceErrors([]);
     setTabResults(null);
     try {
-      const { tabs } = await sheetSyncApi.fetchNtcaLedgerTabs(NTCA_LEDGER_TABLE_BY_CLUSTER[fundCluster]);
+      // A fund cluster can have more than one configured spreadsheet
+      // source (see CustomDisbursementSheetSetupDialog) — tabs from every
+      // one of them are merged here; a source that failed to fetch is
+      // reported separately rather than blocking the others.
+      const { sources, tabs } = await sheetSyncApi.fetchNtcaLedgerTabs(NTCA_LEDGER_TABLE_BY_CLUSTER[fundCluster]);
+      const failed = sources.filter((s) => s.error);
       if (tabs.length === 0) {
-        setError("That spreadsheet has no tabs, or couldn't be read.");
+        setError(
+          failed.length > 0
+            ? failed.map((s) => `${s.label || s.url}: ${s.error}`).join(" | ")
+            : "No tabs found across the configured spreadsheet(s) for this cluster.",
+        );
         return;
       }
+      setSourceErrors(failed.map((s) => `${s.label || s.url}: ${s.error}`));
       const cumulativeAdaIndex = buildExistingAdaIndex(existingDisbursements);
       const results: TabResult[] = [];
       for (const tab of tabs) {
@@ -197,8 +209,17 @@ export function NtcaLedgerSheetSyncDialog({
           ) : tabResults && (
             <>
               <p className="text-xs text-muted-foreground">
-                Found {tabResults.length} tab{tabResults.length === 1 ? "" : "s"} in the configured spreadsheet.
+                Found {tabResults.length} tab{tabResults.length === 1 ? "" : "s"} across the configured spreadsheet(s).
               </p>
+
+              {sourceErrors.length > 0 && (
+                <div className="bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs rounded-lg px-3 py-2 flex flex-col gap-1">
+                  <span className="font-medium">
+                    {sourceErrors.length} sheet{sourceErrors.length === 1 ? "" : "s"} couldn't be read — the rest still synced:
+                  </span>
+                  {sourceErrors.map((e, i) => <span key={i}>{e}</span>)}
+                </div>
+              )}
 
               <div className="flex items-center gap-3 text-xs">
                 <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">

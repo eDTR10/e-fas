@@ -4,7 +4,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "../ui/dialog";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { SourceListSection } from "./SheetSyncManagerDialog";
 import {
   sheetSyncApi, SheetSyncSource, NTCA_LEDGER_TABLE_BY_CLUSTER,
 } from "../../lib/sheetSyncApi";
@@ -12,74 +12,48 @@ import { FUND_CLUSTER_OPTIONS, FundCluster } from "../../lib/ntcaApi";
 
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
-function extractError(err: unknown): string {
-  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
-  if (!data) return "Failed to save. Please try again.";
-  return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
-}
-
-// Each fund cluster gets exactly one whole-spreadsheet source (not a
-// stackable list like other Sheet Setup dialogs) — the sync auto-discovers
-// every monthly tab inside it, so there's nothing more to configure per
-// cluster than the one URL.
+// Each fund cluster's sources are managed the same way every other synced
+// table's are (see SheetSyncManagerDialog / Received NTCA's own Sheet
+// Setup) — a stackable label+URL list, not a single URL — since a cluster
+// can legitimately span more than one spreadsheet (e.g. a prior year's
+// archive plus the current one). This dialog only manages the list; the
+// actual sync is the separate "Sync Sheets" button on the page, which needs
+// its own client-side preview step (NtcaLedgerSheetSyncDialog) that the
+// generic immediate-write "Sync Now" other tables use doesn't support.
 export function CustomDisbursementSheetSetupDialog({
   open, onOpenChange,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [sources, setSources] = useState<Partial<Record<FundCluster, SheetSyncSource>>>({});
-  const [drafts, setDrafts] = useState<Partial<Record<FundCluster, string>>>({});
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState<FundCluster | null>(null);
+  const [sourcesByCluster, setSourcesByCluster] = useState<Partial<Record<FundCluster, SheetSyncSource[]>>>({});
+  const [loadingByCluster, setLoadingByCluster] = useState<Partial<Record<FundCluster, boolean>>>({});
 
-  const load = async () => {
-    setLoading(true);
+  const loadCluster = async (cluster: FundCluster) => {
+    setLoadingByCluster((prev) => ({ ...prev, [cluster]: true }));
     try {
-      const entries = await Promise.all(
-        FUND_CLUSTER_OPTIONS.map(async (o) => {
-          const list = await sheetSyncApi.list(NTCA_LEDGER_TABLE_BY_CLUSTER[o.value]);
-          return [o.value, list[0]] as const;
-        }),
-      );
-      const nextSources: Partial<Record<FundCluster, SheetSyncSource>> = {};
-      const nextDrafts: Partial<Record<FundCluster, string>> = {};
-      for (const [cluster, source] of entries) {
-        if (source) nextSources[cluster] = source;
-        nextDrafts[cluster] = source?.url ?? "";
-      }
-      setSources(nextSources);
-      setDrafts(nextDrafts);
+      const list = await sheetSyncApi.list(NTCA_LEDGER_TABLE_BY_CLUSTER[cluster]);
+      setSourcesByCluster((prev) => ({ ...prev, [cluster]: list }));
     } finally {
-      setLoading(false);
+      setLoadingByCluster((prev) => ({ ...prev, [cluster]: false }));
     }
   };
 
-  useEffect(() => { if (open) load(); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    FUND_CLUSTER_OPTIONS.forEach((o) => loadCluster(o.value));
+  }, [open]);
 
-  const handleSave = async (cluster: FundCluster, label: string) => {
-    const url = (drafts[cluster] ?? "").trim();
-    setSaving(cluster);
-    try {
-      const existing = sources[cluster];
-      if (!url) {
-        if (existing) await sheetSyncApi.remove(existing.id);
-      } else if (existing) {
-        await sheetSyncApi.update(existing.id, {
-          table: NTCA_LEDGER_TABLE_BY_CLUSTER[cluster], label, url, order: 0,
-        });
-      } else {
-        await sheetSyncApi.create({
-          table: NTCA_LEDGER_TABLE_BY_CLUSTER[cluster], label, url, order: 0,
-        });
-      }
-      await load();
-      Swal.fire({ icon: "success", title: "Saved", timer: 1000, showConfirmButton: false, ...swalTheme });
-    } catch (err) {
-      Swal.fire({ icon: "error", title: "Could not save", text: extractError(err), ...swalTheme });
-    } finally {
-      setSaving(null);
-    }
+  const handleRemove = async (cluster: FundCluster, source: SheetSyncSource) => {
+    const result = await Swal.fire({
+      icon: "warning",
+      title: `Remove "${source.label || "this sheet"}"?`,
+      text: "This stops future syncing from this source. Records already imported are not deleted.",
+      showCancelButton: true, confirmButtonText: "Remove", confirmButtonColor: "#dc2626", ...swalTheme,
+    });
+    if (!result.isConfirmed) return;
+    await sheetSyncApi.remove(source.id);
+    await loadCluster(cluster);
   };
 
   return (
@@ -88,45 +62,32 @@ export function CustomDisbursementSheetSetupDialog({
         <DialogHeader className="border-b border-border">
           <DialogTitle>Sheet Setup — Custom Disbursement</DialogTitle>
         </DialogHeader>
-        <div className="px-4 py-4 flex flex-col gap-4">
-          <p className="text-xs text-muted-foreground">
-            One whole spreadsheet per fund cluster — every tab in it (e.g. "MDS-REGULAR Jan2026", or a merged range
-            like "MDS-REGULAR Jan2026-Feb2026") is picked up automatically on sync, and each row lands in whichever
-            month its own Date column says, so tabs never need to be added one at a time.
+        <div className="px-4 py-4 flex flex-col gap-5 max-h-[70vh] overflow-y-auto">
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Add Google Sheet URLs per fund cluster, then sync from the page's own "Sync Sheets" button. Every tab in
+            each sheet (e.g. "MDS-REGULAR Jan2026", or a merged range like "MDS-REGULAR Jan2026-Feb2026") is picked
+            up automatically — each row lands in whichever month its own Date column says, so tabs never need to be
+            added one at a time, and a cluster isn't limited to just one spreadsheet.
           </p>
-          {loading ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {FUND_CLUSTER_OPTIONS.map((o) => (
-                <div key={o.value} className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">{o.label}</label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={drafts[o.value] ?? ""}
-                      onChange={(e) => setDrafts((prev) => ({ ...prev, [o.value]: e.target.value }))}
-                      placeholder="https://docs.google.com/spreadsheets/d/..."
-                      className="flex-1"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-foreground shrink-0"
-                      disabled={saving === o.value || (drafts[o.value] ?? "") === (sources[o.value]?.url ?? "")}
-                      onClick={() => handleSave(o.value, o.label)}
-                    >
-                      {saving === o.value ? "Saving…" : "Save"}
-                    </Button>
-                  </div>
-                  {sources[o.value]?.last_synced_at && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Last synced {new Date(sources[o.value]!.last_synced_at as string).toLocaleString()}
-                    </p>
-                  )}
-                </div>
-              ))}
+          {FUND_CLUSTER_OPTIONS.map((o, i) => (
+            <div key={o.value} className="flex flex-col gap-3">
+              {i > 0 && <div className="border-t border-border -mt-2" />}
+              <SourceListSection
+                label={o.label}
+                sources={sourcesByCluster[o.value] ?? []}
+                loading={loadingByCluster[o.value] ?? true}
+                busy={false}
+                onAdd={async (label, url) => {
+                  await sheetSyncApi.create({
+                    table: NTCA_LEDGER_TABLE_BY_CLUSTER[o.value], label, url,
+                    order: (sourcesByCluster[o.value] ?? []).length,
+                  });
+                  await loadCluster(o.value);
+                }}
+                onRequestRemove={(source) => handleRemove(o.value, source)}
+              />
             </div>
-          )}
+          ))}
         </div>
         <DialogFooter className="border-t border-border justify-end">
           <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)}>Close</Button>

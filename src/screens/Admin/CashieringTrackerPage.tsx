@@ -534,7 +534,13 @@ const CashieringTrackerPage = () => {
   };
 
   const totalNetAmount = filtered.reduce((s, e) => s + Number(e.net_amount || 0), 0);
-  const paidCount = filtered.filter((e) => !!e.date_paid).length;
+  // A row with an actual payment date is obviously paid; one whose Status
+  // of Documents is "Complete" is treated as paid too — in practice these
+  // DVs get marked Complete once payment has gone through, even when
+  // nobody's gone back to backfill the Date Paid field itself.
+  const isPaid = (e: CashieringTrackerEntry) =>
+    !!e.date_paid || e.status_of_documents.trim().toLowerCase() === "complete";
+  const paidCount = filtered.filter(isPaid).length;
   const pendingCount = filtered.length - paidCount;
 
   return (

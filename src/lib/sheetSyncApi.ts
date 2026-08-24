@@ -28,11 +28,14 @@ export const SYNC_TABLE_OPTIONS: { value: SyncTable; label: string }[] = [
   { value: "ntca_ledger_trust", label: "Custom Disbursement — Trust" },
 ];
 
-// One dedicated whole-spreadsheet source per fund cluster — every tab in it
-// (e.g. "MDS-REGULAR Jan2026", "MDS-REGULAR Jan2026-Feb2026") is fetched and
-// parsed by ntcaLedgerSheetSync.ts; which tab a row actually belongs to is
-// decided by that row's own date, not by the tab name, so a merged-range
-// tab needs no special handling — see fetchNtcaLedgerTabs below.
+// A fund cluster can have more than one configured spreadsheet source, same
+// as every other synced table (Received NTCA, RAOD, ...) — every tab across
+// every one of them (e.g. "MDS-REGULAR Jan2026", "MDS-REGULAR Jan2026-Feb2026")
+// is fetched and parsed by NtcaLedgerSheetSyncDialog; which tab a row
+// actually belongs to is decided by that row's own date, not by the tab
+// name or which source it came from, so a merged-range tab — or a second
+// spreadsheet entirely — needs no special handling. See fetchNtcaLedgerTabs
+// below.
 export const NTCA_LEDGER_TABLE_BY_CLUSTER: Record<"mds_regular" | "mds_special" | "trust", SyncTable> = {
   mds_regular: "ntca_ledger_mds_regular",
   mds_special: "ntca_ledger_mds_special",
@@ -45,9 +48,16 @@ export interface NtcaLedgerSheetTab {
   csv_text: string;
 }
 
-export interface NtcaLedgerTabsResult {
+export interface NtcaLedgerSourceResult {
+  id: number;
   label: string;
   url: string;
+  error: string | null;
+  tab_count: number;
+}
+
+export interface NtcaLedgerTabsResult {
+  sources: NtcaLedgerSourceResult[];
   tabs: NtcaLedgerSheetTab[];
 }
 
@@ -126,10 +136,11 @@ export const sheetSyncApi = {
     }
   },
 
-  // Fetches every tab in the given fund cluster's configured spreadsheet as
-  // raw CSV text — parsing (matching against NTCA records, flagging advance
-  // disbursements) and the actual bulk-import both happen client-side (see
-  // NtcaLedgerSheetSyncDialog), reusing the same logic a manual paste
+  // Fetches every tab across every configured spreadsheet source for the
+  // given fund cluster, merged into one list, as raw CSV text — parsing
+  // (matching against NTCA records, flagging advance disbursements) and the
+  // actual bulk-import both happen client-side (see NtcaLedgerSheetSyncDialog),
+  // reusing the same logic a manual paste
   // already goes through instead of duplicating it in Python.
   fetchNtcaLedgerTabs: async (table: SyncTable): Promise<NtcaLedgerTabsResult> => {
     const { data } = await api.get<NtcaLedgerTabsResult>(`${BASE}/ntca_ledger_tabs/`, { params: { table } });

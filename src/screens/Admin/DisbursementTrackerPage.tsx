@@ -777,8 +777,9 @@ const DisbursementTrackerPage = () => {
           line. This keeps the DV count/Amount grouped without dropping the
           Net breakdown recorded in the working sheet. */}
       <KpiStrip cards={[
-        { title: "Total Amount", value: formatMoney(groups.reduce((s, g) => s + g.totalAmount, 0)), icon: FileText },
         { title: "Total DVs", value: String(groups.length), icon: Wallet },
+        { title: "Total DV Amount", value: formatMoney(groups.reduce((s, g) => s + g.totalAmount, 0)), icon: FileText },
+
         {
           title: "Total Net",
           value: formatMoney(groups.reduce((s, g) => s + g.totalNet, 0) + unmatchedAcctgNetSum),

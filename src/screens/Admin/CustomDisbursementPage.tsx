@@ -40,6 +40,7 @@ import {
   ntcaDisbursementApi,
 } from "../../lib/ntcaDisbursementApi";
 import KpiStrip from "../../components/ui/kpi-strip";
+import ShareBarChart from "../../components/charts/ShareBarChart";
 import { NtcaLedgerPasteImportDialog } from "../../components/admin/NtcaLedgerPasteImportDialog";
 import { NtcaLedgerTrackerDialog } from "../../components/admin/NtcaLedgerTrackerDialog";
 import { AdaDisbursedBreakdownDialog } from "../../components/admin/AdaDisbursedBreakdownDialog";
@@ -72,10 +73,10 @@ const formatDate = (value: string): string => {
   return Number.isNaN(parsed.getTime())
     ? value
     : parsed.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
 };
 
 const extractError = (error: unknown): string => {
@@ -86,6 +87,14 @@ const extractError = (error: unknown): string => {
     .map(([key, value]) =>
       `${key}: ${Array.isArray(value) ? value.join(" ") : String(value)}`)
     .join(" | ");
+};
+
+// Matches the backend's own normalization (NtcaDisbursementSerializer.
+// _normalize_ada_no) — strip a leading "#", and strip leading zeros off a
+// purely numeric value, so "#002", "002", and "2" all compare equal.
+const normalizeAdaNo = (value: string): string => {
+  const trimmed = value.trim().replace(/^#/, "").trim();
+  return /^\d+$/.test(trimmed) ? String(Number(trimmed)) : trimmed;
 };
 
 const monthBounds = (year: number, month: number) => {
@@ -228,12 +237,44 @@ function DisbursementDialog({
 
   const submit = async () => {
     const numericAmount = Number(amount);
-    if (!ntcaId || !date || !Number.isFinite(numericAmount) || numericAmount <= 0) {
-      setError("Choose an NTCA and enter a valid date and amount.");
+    // An advance disbursement (created via paste-import — see
+    // NtcaDisbursement.ntca) legitimately has no NTCA to pick when it's
+    // edited here; only require one for a brand-new disbursement, or when
+    // editing one that was already linked to an NTCA.
+    const requiresNtca = !editing || editing.ntca !== null;
+
+    if (requiresNtca && !ntcaId) {
+      setError("Choose an NTCA to deduct from.");
       return;
     }
-    if (numericAmount > available) {
+    if (!date) {
+      setError("Choose a disbursement date.");
+      return;
+    }
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      setError("Enter a valid amount to deduct.");
+      return;
+    }
+    if (selectedNtca && numericAmount > available) {
       setError(`The amount exceeds the available NTCA balance of ${formatMoney(available)}.`);
+      return;
+    }
+    const normalizedAda = normalizeAdaNo(adaNo);
+    if (!normalizedAda) {
+      setError("Enter an ADA number.");
+      return;
+    }
+    // ADA numbers are shared across every fund cluster and unique per
+    // calendar year (matching the backend's own check) — catching a
+    // collision here, before submitting, means the error can name the
+    // actual problem instead of a generic save failure.
+    const adaYear = Number(date.slice(0, 4));
+    const duplicate = disbursements.find((entry) =>
+      entry.id !== editing?.id &&
+      Number(entry.date.slice(0, 4)) === adaYear &&
+      normalizeAdaNo(entry.ada_no) === normalizedAda);
+    if (duplicate) {
+      setError(`ADA number "${adaNo.trim()}" is already used by another disbursement in ${adaYear} — choose a different number.`);
       return;
     }
 
@@ -494,6 +535,21 @@ const CustomDisbursementPage = () => {
     [disbursements, selectedCluster, ntcas, trackedNcaKeys],
   );
 
+  // All-time (not month-scoped) totals for this cluster — distinct from
+  // "ADA disbursed" above, which only covers the selected month.
+  const totalClusterDisbursed = useMemo(
+    () => clusterDisbursements.reduce((sum, entry) => sum + Number(entry.amount), 0),
+    [clusterDisbursements],
+  );
+  const totalClusterAdvanceDisbursed = useMemo(
+    () => clusterDisbursements.filter((entry) => entry.ntca === null).reduce((sum, entry) => sum + Number(entry.amount), 0),
+    [clusterDisbursements],
+  );
+  const totalClusterNtcaReceived = useMemo(
+    () => allClusterNtcas.reduce((sum, ntca) => sum + Number(ntca.amount), 0),
+    [allClusterNtcas],
+  );
+
   const { start, next } = monthBounds(selectedYear, selectedMonth);
 
   const monthlyRows = useMemo<MonthlyNtcaRow[]>(() => {
@@ -706,11 +762,10 @@ const CustomDisbursementPage = () => {
                 key={option.value}
                 type="button"
                 onClick={() => setSelectedCluster(option.value)}
-                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-                  selectedCluster === option.value
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${selectedCluster === option.value
                     ? "border-primary bg-primary text-primary-foreground"
                     : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
+                  }`}
               >
                 {option.label}
               </button>
@@ -724,11 +779,10 @@ const CustomDisbursementPage = () => {
               key={month}
               type="button"
               onClick={() => setSelectedMonth(index)}
-              className={`relative rounded-md px-2 py-2 text-xs font-semibold transition-colors ${
-                selectedMonth === index
+              className={`relative rounded-md px-2 py-2 text-xs font-semibold transition-colors ${selectedMonth === index
                   ? "bg-background text-primary shadow-sm"
                   : "text-muted-foreground hover:bg-background/70 hover:text-foreground"
-              }`}
+                }`}
             >
               {month}
               {monthCounts[index] > 0 && (
@@ -771,6 +825,42 @@ const CustomDisbursementPage = () => {
           Add disbursement
         </Button>
       </div>
+
+      {!loading && (
+        <div className="grid grid-cols-[1fr_280px] gap-4 mb-6 lg:grid-cols-1">
+          <ShareBarChart
+            title="NTCA Received vs NTCA Disbursed"
+            subtitle={`Share of Total NTCA Received disbursed so far for ${clusterLabel} (all-time), including disbursements with no NTCA yet`}
+            series={[
+              { key: "disbursedLinked", label: "NTCA Disbursed", colorIndex: 2 },
+              { key: "disbursedAdvance", label: "No NTCA Yet", colorIndex: 1 },
+              { key: "remaining", label: "Remaining NTCA Balance", colorIndex: 0 },
+            ]}
+            data={{
+              disbursedLinked: Math.max(totalClusterDisbursed - totalClusterAdvanceDisbursed, 0),
+              disbursedAdvance: totalClusterAdvanceDisbursed,
+              remaining: Math.max(totalClusterNtcaReceived - totalClusterDisbursed, 0),
+            }}
+            formatValue={formatMoney}
+            totalLabel="Total NTCA Received"
+            totalValue={totalClusterNtcaReceived}
+          />
+          <div className="bg-card border border-border rounded-xl p-5 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Total Disbursed</p>
+              <span className="p-2 rounded-lg bg-primary/10 text-primary">
+                <Wallet className="w-5 h-5" />
+              </span>
+            </div>
+            <p className="text-2xl font-bold text-foreground">{formatMoney(totalClusterDisbursed)}</p>
+            <p className={`text-xs font-medium ${totalClusterAdvanceDisbursed > 0 ? "text-destructive" : "text-muted-foreground"}`}>
+              {totalClusterAdvanceDisbursed > 0
+                ? `Incl. ${formatMoney(totalClusterAdvanceDisbursed)} not yet in NTCA Received`
+                : `All-time total for ${clusterLabel}`}
+            </p>
+          </div>
+        </div>
+      )}
 
       {!loading && (
         <KpiStrip cards={[

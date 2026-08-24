@@ -772,6 +772,12 @@ const NtcaPage = () => {
 
       {/* KPI Strip */}
       <KpiStrip cards={[
+        {
+          title: "Total NTCA",
+          value: String(filtered.length),
+          caption: filtered.length === entries.length ? undefined : `of ${entries.length} loaded`,
+          icon: Scale,
+        },
         { title: "Total NTCA Amount", value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount || 0), 0)), icon: FileText },
         { title: "Linked to SARO", value: String(filtered.filter((x) => x.saro_no && saroById.has(x.saro_no)).length), caption: `${filtered.length} total`, icon: Link2 },
         { title: "Unlinked NTCA", value: String(filtered.filter((x) => !x.saro_no || !saroById.has(x.saro_no)).length), icon: Link2Off },

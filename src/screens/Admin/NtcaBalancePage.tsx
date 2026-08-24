@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2,
+  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2, Search,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import AdminLayout from "./AdminLayout";
@@ -297,6 +297,13 @@ const NtcaBalancePage = () => {
   const [saroFormCategoryName, setSaroFormCategoryName] = useState<string | undefined>(undefined);
   const [editingSaro, setEditingSaro] = useState<NtcaBalanceSaroReport | null>(null);
 
+  // ── Search + PAP/SARO filters — client-side, over whatever the current
+  // Year/Fund Cluster tab already loaded (mirrors the Dashboard's PAP/SARO
+  // filters; Year and Cluster already have their own controls above). ──
+  const [searchQuery, setSearchQuery] = useState("");
+  const [papFilter, setPapFilter] = useState("");
+  const [saroFilter, setSaroFilter] = useState("");
+
   const load = async () => {
     setLoading(true);
     try {
@@ -360,12 +367,61 @@ const NtcaBalancePage = () => {
 
   const { selected, toggle, toggleAll, clear: clearSelection, isAllSelected, isSomeSelected } = useSelection<number>();
 
+  const papOptions = useMemo(() => {
+    if (!report) return [];
+    const map = new Map<string, string>();
+    report.categories.forEach((cat) => cat.saros.forEach((s) => {
+      if (s.pap_code) map.set(s.pap_code, s.pap || s.pap_code);
+    }));
+    return Array.from(map.entries()).map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [report]);
+
+  const saroOptions = useMemo(() => {
+    if (!report) return [];
+    const set = new Set<string>();
+    report.categories.forEach((cat) => cat.saros.forEach((s) => { if (s.saro_no) set.add(s.saro_no); }));
+    return Array.from(set).sort();
+  }, [report]);
+
+  const hasActiveFilter = !!searchQuery.trim() || !!papFilter || !!saroFilter;
+
+  const clearAllFilters = () => { setSearchQuery(""); setPapFilter(""); setSaroFilter(""); };
+
+  // Categories/rows for the currently loaded Year+Cluster report, narrowed
+  // by search/PAP/SARO — a category whose own name matches the search
+  // shows all of its (already PAP/SARO-filtered) rows; otherwise only rows
+  // that themselves match survive. Category-level totals in the header
+  // stay the server-computed whole-category figures either way — this only
+  // narrows which individual SARO rows are visible for lookup, it doesn't
+  // recompute a partial subtotal.
+  const filteredCategories = useMemo(() => {
+    if (!report) return [];
+    const q = searchQuery.trim().toLowerCase();
+    return report.categories
+      .map((cat) => {
+        const nameMatches = q !== "" && cat.name.toLowerCase().includes(q);
+        const saros = cat.saros.filter((s) => {
+          if (papFilter && s.pap_code !== papFilter) return false;
+          if (saroFilter && s.saro_no !== saroFilter) return false;
+          if (q === "" || nameMatches) return true;
+          return (
+            s.saro_no.toLowerCase().includes(q) ||
+            s.pap.toLowerCase().includes(q) ||
+            s.purpose.toLowerCase().includes(q) ||
+            s.pap_code.toLowerCase().includes(q)
+          );
+        });
+        return { ...cat, saros };
+      })
+      .filter((cat) => cat.saros.length > 0 || !hasActiveFilter);
+  }, [report, searchQuery, papFilter, saroFilter, hasActiveFilter]);
+
   // Every SARO row across every category currently shown (not just expanded
   // ones) — "select all" and bulk delete act on the whole filtered table,
   // matching how the other admin list pages' select-all behaves.
   const allSaroIds = useMemo(
-    () => (report ? report.categories.flatMap((c) => c.saros.map((s) => s.id)) : []),
-    [report]
+    () => filteredCategories.flatMap((c) => c.saros.map((s) => s.id)),
+    [filteredCategories]
   );
 
   const handleBulkDelete = async () => {
@@ -401,7 +457,7 @@ const NtcaBalancePage = () => {
 
   return (
     <AdminLayout title="NTCA Balance" subtitle="Monitoring of NTCA Balance (Per SARO), by quarter">
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+      <div className="flex items-center gap-3 mb-3 sm:flex-col sm:items-stretch">
         <div className="flex gap-1.5">
           {FUND_CLUSTER_TABS.map((t) => (
             <button
@@ -422,6 +478,40 @@ const NtcaBalancePage = () => {
         >
           {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        <select
+          value={papFilter}
+          onChange={(e) => setPapFilter(e.target.value)}
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
+        >
+          <option value="">All PAP / Projects</option>
+          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+        </select>
+        <select
+          value={saroFilter}
+          onChange={(e) => setSaroFilter(e.target.value)}
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+        >
+          <option value="">All SAROs</option>
+          {saroOptions.map((no) => <option key={no} value={no}>{no}</option>)}
+        </select>
+        {hasActiveFilter && (
+          <button onClick={clearAllFilters} className="text-xs text-muted-foreground hover:text-foreground underline">
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 max-w-xs sm:max-w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search SARO no., PAP, or purpose..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
+          />
+        </div>
         <div className="flex gap-2 ml-auto sm:ml-0">
           <Button variant="outline" className="text-foreground" onClick={handleDeleteAll}>
             <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
@@ -440,6 +530,11 @@ const NtcaBalancePage = () => {
         <div className="bg-card border border-border rounded-xl px-5 py-10 text-center text-sm text-muted-foreground">
           No categories with data in {FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label} for {year} yet.
           Click "Add Category" to create one, then tag its SARO No.(s).
+        </div>
+      ) : filteredCategories.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl px-5 py-10 text-center text-sm text-muted-foreground">
+          No SARO rows match your search/filters.{" "}
+          <button onClick={clearAllFilters} className="text-primary underline">Clear filters</button>
         </div>
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -477,8 +572,13 @@ const NtcaBalancePage = () => {
                 <span className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>Balance Total</span>
               </div>
 
-              {report.categories.map((cat) => {
+              {filteredCategories.map((cat) => {
                 const catSaroIds = cat.saros.map((s) => s.id);
+                // While a search/PAP/SARO filter is active, every category
+                // shown already only contains matching rows — force it open
+                // so those rows are actually visible without an extra click,
+                // rather than requiring the user to expand each match by hand.
+                const isExpanded = expanded.has(cat.id) || hasActiveFilter;
                 return (
                 <div key={cat.id}>
                   <div
@@ -494,7 +594,7 @@ const NtcaBalancePage = () => {
                       />
                     </span>
                     <span className="text-muted-foreground">
-                      {expanded.has(cat.id) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </span>
                     <span className="min-w-0"><CategoryChip label={cat.name} /></span>
                     <span /><span />
@@ -523,7 +623,7 @@ const NtcaBalancePage = () => {
                     <span className={`text-xs font-semibold text-right ${Number(cat.balance_total) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(cat.balance_total)}</span>
                   </div>
 
-                  {expanded.has(cat.id) && cat.saros.map((s) => (
+                  {isExpanded && cat.saros.map((s) => (
                     <div
                       key={s.id}
                       className="grid gap-x-2 px-4 py-2 border-b border-border items-center text-xs"

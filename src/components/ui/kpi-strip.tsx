@@ -14,7 +14,7 @@ export interface KpiCardData {
 export default function KpiStrip({ cards }: { cards: KpiCardData[] }) {
   if (cards.length === 0) return null;
   return (
-    <div className="grid grid-cols-4 gap-4 mb-6 lg:grid-cols-2 sm:grid-cols-1">
+    <div className="grid grid-cols-4 gap-4 mb-6 sm:grid-cols-1">
       {cards.map((card) => {
         const Icon = card.icon;
         const clickable = !!card.onClick;

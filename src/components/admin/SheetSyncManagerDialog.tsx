@@ -75,8 +75,13 @@ const formatDateTime = (value: string | null): string => {
 // Rendered once for the primary table and, when the dialog is configured
 // with one, again for the secondary table — so e.g. Disbursement Tracker's
 // own DV sheet and its separate Net (Acctg) sheet can both be managed from
-// the same dialog instead of needing two.
-function SourceListSection({
+// the same dialog instead of needing two. Exported so other dialogs that
+// need this exact multi-source add/remove UI — but not the generic
+// immediate-write "Sync Now" this dialog also provides, e.g.
+// CustomDisbursementSheetSetupDialog, whose actual sync is a separate
+// client-side-preview flow — can reuse it directly instead of duplicating
+// this list/add/remove markup.
+export function SourceListSection({
   label,
   sources,
   loading,
