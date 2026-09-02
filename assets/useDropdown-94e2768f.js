@@ -1,1 +1,0 @@
-import{r as n}from"./index-b357f001.js";function c(){const[e,r]=n.useState(!1),t=n.useRef(null);return n.useEffect(()=>{if(!e)return;const o=s=>{t.current&&!t.current.contains(s.target)&&r(!1)};return document.addEventListener("mousedown",o),()=>document.removeEventListener("mousedown",o)},[e]),{open:e,setOpen:r,containerRef:t}}export{c as u};
