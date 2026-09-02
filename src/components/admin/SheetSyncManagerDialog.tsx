@@ -229,7 +229,12 @@ export function SheetSyncManagerDialog({
   const [sources, setSources] = useState<SheetSyncSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [secondarySources, setSecondarySources] = useState<SheetSyncSource[]>([]);
-  const [secondaryLoading, setSecondaryLoading] = useState(true);
+  // Only starts "loading" when there's actually a secondary table to fetch
+  // — most callers (e.g. RAOD) don't pass one at all, and loadSecondary()
+  // below returns immediately without ever clearing this, so starting it
+  // at `true` unconditionally left "Sync Now" permanently disabled
+  // (disabled={... || secondaryLoading}) for every table without one.
+  const [secondaryLoading, setSecondaryLoading] = useState(!!secondaryTable);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
@@ -247,7 +252,7 @@ export function SheetSyncManagerDialog({
   };
 
   const loadSecondary = async () => {
-    if (!secondaryTable) return;
+    if (!secondaryTable) { setSecondaryLoading(false); return; }
     setSecondaryLoading(true);
     try {
       setSecondarySources(await sheetSyncApi.list(secondaryTable));

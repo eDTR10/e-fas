@@ -756,6 +756,13 @@ const ReceivedSaroPage = () => {
     return Array.from(years).sort((a, b) => b - a);
   }, [entries]);
 
+  const [papFilter, setPapFilter] = useState("");
+  const papOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    entries.forEach((e) => { if (e.pap_code && !map.has(e.pap_code)) map.set(e.pap_code, e.pap_name || e.pap_code); });
+    return Array.from(map.entries()).map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries]);
+
   const {
     year, quarter, dateFrom, dateTo,
     setYear, applyQuarter, setDateFrom, setDateTo,
@@ -763,13 +770,14 @@ const ReceivedSaroPage = () => {
   } = useDateRangeFilter(availableYears);
 
   const clearFilters = () => {
-    clearDateFilters(); setSearch("");
+    clearDateFilters(); setSearch(""); setPapFilter("");
   };
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return entries.filter((e) => {
       if (!inRange(e.date_received)) return false;
+      if (papFilter && e.pap_code !== papFilter) return false;
       if (!q) return true;
       return (
         e.saro_no.toLowerCase().includes(q) ||
@@ -778,7 +786,7 @@ const ReceivedSaroPage = () => {
         e.fund_type.toLowerCase().includes(q)
       );
     });
-  }, [entries, search, inRange]);
+  }, [entries, search, papFilter, inRange]);
 
   // Per-column sort + filter on top of the search/date filters above.
   const { sortKey, sortDir, toggleSort, applySort } = useTableSort<ReceivedSARO>((row, key) => {
@@ -933,8 +941,17 @@ const ReceivedSaroPage = () => {
         onDateFromChange={setDateFrom}
         onDateToChange={setDateTo}
         onClear={clearFilters}
-        hasActiveFilters={hasActiveDateFilter || !!search}
-      />
+        hasActiveFilters={hasActiveDateFilter || !!search || !!papFilter}
+      >
+        <select
+          value={papFilter}
+          onChange={(e) => setPapFilter(e.target.value)}
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
+        >
+          <option value="">All PAP / Projects</option>
+          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+        </select>
+      </DateRangeFilterBar>
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">

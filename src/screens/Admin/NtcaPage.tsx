@@ -535,9 +535,15 @@ const NtcaPage = () => {
   const [fundClusterFilter, setFundClusterFilter] = useState<FundCluster | "unclassified" | "">("");
   const [bulkFundCluster, setBulkFundCluster] = useState<FundCluster>("mds_regular");
   const [settingFundCluster, setSettingFundCluster] = useState(false);
+  const [papFilter, setPapFilter] = useState("");
+  const papOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    entries.forEach((n) => { if (n.pap_code && !map.has(n.pap_code)) map.set(n.pap_code, n.particulars || n.pap_code); });
+    return Array.from(map.entries()).map(([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries]);
 
   const clearFilters = () => {
-    clearDateFilters(); setSearch(""); setFundClusterFilter("");
+    clearDateFilters(); setSearch(""); setFundClusterFilter(""); setPapFilter("");
   };
 
   const filtered = useMemo(() => {
@@ -545,6 +551,7 @@ const NtcaPage = () => {
     return entries.filter((n) => {
       if (!inRange(n.date_of_ntca)) return false;
       if (fundClusterFilter === "unclassified" ? !!n.fund_cluster : fundClusterFilter && n.fund_cluster !== fundClusterFilter) return false;
+      if (papFilter && n.pap_code !== papFilter) return false;
       if (!q) return true;
       return (
         n.ntca_no.toLowerCase().includes(q) ||
@@ -553,7 +560,7 @@ const NtcaPage = () => {
         n.pap_code.toLowerCase().includes(q)
       );
     });
-  }, [entries, search, fundClusterFilter, inRange]);
+  }, [entries, search, fundClusterFilter, papFilter, inRange]);
 
   // Per-column sort + filter on top of the search/date/fund-cluster filters.
   const { sortKey, sortDir, toggleSort, applySort } = useTableSort<NTCA>((row, key) => {
@@ -722,8 +729,16 @@ const NtcaPage = () => {
         onDateFromChange={setDateFrom}
         onDateToChange={setDateTo}
         onClear={clearFilters}
-        hasActiveFilters={hasActiveDateFilter || !!search || !!fundClusterFilter}
+        hasActiveFilters={hasActiveDateFilter || !!search || !!fundClusterFilter || !!papFilter}
       >
+        <select
+          value={papFilter}
+          onChange={(e) => setPapFilter(e.target.value)}
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
+        >
+          <option value="">All PAP / Projects</option>
+          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+        </select>
         <select
           value={fundClusterFilter}
           onChange={(e) => setFundClusterFilter(e.target.value as FundCluster | "unclassified" | "")}

@@ -227,7 +227,7 @@ export function NtcaLedgerSheetSyncDialog({
                 </span>
                 {advanceCount > 0 && (
                   <span className="inline-flex items-center gap-1 text-destructive">
-                    <AlertTriangle className="w-3.5 h-3.5" /> {advanceCount} advance (NCA not yet received)
+                    <AlertTriangle className="w-3.5 h-3.5" /> {advanceCount} advance (no NTCA / insufficient balance)
                   </span>
                 )}
                 {withIssues.length > 0 && (
@@ -268,14 +268,16 @@ export function NtcaLedgerSheetSyncDialog({
                               <div key={row.rowNumber} className={`grid grid-cols-[85px_75px_90px_80px_1fr_100px] gap-2 px-3 py-1.5 border-t border-border text-xs items-center ${row.issues.length > 0 || row.advance ? "bg-destructive/5" : ""}`}>
                                 <span className="text-foreground truncate">{row.date ?? (row.rawDate || "—")}</span>
                                 <span className="text-muted-foreground truncate">{formatMonthLabel(row.date)}</span>
-                                <span className="text-foreground truncate">{row.ntcaMatch ? (row.ntcaMatch.nca_no || row.ntcaMatch.ntca_no) : (row.rawNtca || "—")}</span>
+                                <span className="text-foreground truncate">{row.ntcaMatch ? (row.ntcaMatch.nca_no || row.ntcaMatch.ntca_no) : (row.normalizedNtca || row.rawNtca || "—")}</span>
                                 <span className="text-foreground truncate">#{row.adaNo || "—"}</span>
                                 <span className="text-right tabular-nums text-foreground">{formatMoney(row.amount)}</span>
                                 <span>
                                   {row.issues.length > 0 ? (
                                     <span title={row.issues.join("; ")}><Badge variant="destructive">{row.issues[0]}</Badge></span>
                                   ) : row.advance ? (
-                                    <Badge variant="destructive">Advance</Badge>
+                                    <span title={row.advanceReason || "Will be imported as an advance disbursement."}>
+                                      <Badge variant="destructive">Advance</Badge>
+                                    </span>
                                   ) : (
                                     <Badge variant="success">Ready</Badge>
                                   )}

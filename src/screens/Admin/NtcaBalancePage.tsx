@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2, Search,
+  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2, Search, ListTree,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import AdminLayout from "./AdminLayout";
@@ -13,6 +13,7 @@ import {
 import { SelectAllCheckbox } from "../../components/ui/select-all-checkbox";
 import { BulkActionBar } from "../../components/ui/bulk-action-bar";
 import { useSelection } from "../../lib/useSelection";
+import { useDropdown } from "../../lib/useDropdown";
 import { CategoryChip } from "../../components/ui/category-chip";
 import { QuickFillSelect } from "../../components/ui/quick-fill-select";
 import {
@@ -51,10 +52,13 @@ const QUARTER_LABELS = ["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"];
 // Leading "24px 24px" is the select checkbox, then the expand chevron.
 // "104px" right after SARO No. is the add/edit/delete action icons — kept
 // near the front (not trailing after 15 numeric columns) so it's visible
-// without scrolling the table horizontally.
-const GRID_TEMPLATE_COLUMNS =
+// without scrolling the table horizontally. The quarter count is dynamic —
+// hiding a quarter column (see visibleQuarters) removes it from the grid
+// entirely rather than just visually blanking it, so the table narrows
+// instead of leaving empty space.
+const buildGridTemplateColumns = (quarterCount: number) =>
   "24px 24px minmax(160px, 1.3fr) minmax(200px, 1.6fr) minmax(110px, 1fr) 104px " +
-  "repeat(4, 90px) 100px repeat(4, 90px) 100px repeat(4, 90px) 100px";
+  `repeat(${quarterCount}, 90px) 100px repeat(${quarterCount}, 90px) 100px repeat(${quarterCount}, 90px) 100px`;
 
 const formatMoney = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined || value === "") return "—";
@@ -62,6 +66,56 @@ const formatMoney = (value: string | number | null | undefined): string => {
   if (Number.isNaN(n)) return "—";
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
+
+// Which quarter columns to show — a checkbox-per-quarter dropdown rather
+// than a native <select multiple> (those need ctrl/cmd-click to pick more
+// than one, which isn't discoverable) or inline toggle pills (took up a
+// full row of horizontal space for something used far less often than
+// Year/Category/PAP/SARO).
+function QuarterDropdown({
+  visibleQuarters, onToggle, onSelectAll,
+}: {
+  visibleQuarters: Set<number>;
+  onToggle: (i: number) => void;
+  onSelectAll: () => void;
+}) {
+  const { open, setOpen, containerRef } = useDropdown<HTMLDivElement>();
+
+  const selectedIndices = [0, 1, 2, 3].filter((i) => visibleQuarters.has(i));
+  const allSelected = selectedIndices.length === 4;
+  const summary = allSelected ? "All Quarters" : selectedIndices.map((i) => `Q${i + 1}`).join(", ");
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+      >
+        {summary}
+        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-36 rounded-lg border border-border bg-popover shadow-lg py-1">
+          <label className="flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors cursor-pointer">
+            <input type="checkbox" checked={allSelected} onChange={onSelectAll} />
+            All
+          </label>
+          <div className="border-t border-border my-1" />
+          {QUARTER_LABELS.map((label, i) => (
+            <label
+              key={label}
+              className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-foreground hover:bg-accent transition-colors cursor-pointer"
+            >
+              <input type="checkbox" checked={visibleQuarters.has(i)} onChange={() => onToggle(i)} />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Add/rename a category — deliberately name+order only. Tagged SARO rows
@@ -236,7 +290,8 @@ function SaroFormDialog({
           )}
           <Field label="SARO No. *">
             <QuickFillSelect
-              placeholder="Pick from Received SARO list…"
+              searchable
+              placeholder="Search Received SARO list…"
               items={saroList}
               getLabel={(s) => `${s.saro_no} — ${s.pap_name || "(no PAP name)"}`}
               onPick={pickSaro}
@@ -280,6 +335,85 @@ function SaroFormDialog({
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Read-only overview — every category and its tagged SARO No.(s), stripped
+// down to just the names/numbers (no quarterly figures) so it reads as a
+// quick reference for "what's tagged where" instead of a financial report.
+// Shows whatever the page's own search/PAP/SARO filters already narrowed
+// to, for the currently selected cluster/year — not a separate, unfiltered
+// view.
+// ─────────────────────────────────────────────────────────────────────────
+function CategoryTaggingOverviewDialog({
+  open, onOpenChange, categories, clusterLabel, year, onAddSaro,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  categories: NtcaBalanceCategoryReport[];
+  clusterLabel: string;
+  year: number;
+  // Opens the existing SaroFormDialog (rendered at the page level) for this
+  // category — stacks on top rather than closing this modal, so saving
+  // lands back here with the list already refreshed.
+  onAddSaro: (categoryId: number, categoryName: string) => void;
+}) {
+  const totalSaros = categories.reduce((sum, c) => sum + c.saros.length, 0);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader className="border-b border-border">
+          <DialogTitle>Category &amp; SARO Tagging — {clusterLabel} {year}</DialogTitle>
+        </DialogHeader>
+        <div className="px-4 py-4 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
+          {categories.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No categories match the current filters.
+            </p>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {categories.length} categor{categories.length === 1 ? "y" : "ies"}, {totalSaros} tagged SARO{totalSaros === 1 ? "" : "s"}.
+              </p>
+              {categories.map((cat) => (
+                <div key={cat.id} className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <CategoryChip label={cat.name} />
+                    <span className="text-[11px] text-muted-foreground">
+                      {cat.saros.length} SARO{cat.saros.length === 1 ? "" : "s"}
+                    </span>
+                    <button
+                      onClick={() => onAddSaro(cat.id, cat.name)}
+                      className="ml-auto flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                      title={`Tag a SARO under "${cat.name}"`}
+                    >
+                      <Plus className="w-3 h-3" /> Add SARO
+                    </button>
+                  </div>
+                  {cat.saros.length === 0 ? (
+                    <p className="text-xs text-muted-foreground pl-1">No SARO No. tagged yet.</p>
+                  ) : (
+                    <div className="border border-border rounded-lg overflow-hidden">
+                      {cat.saros.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-2 border-b border-border last:border-0 text-xs">
+                          <span className="font-medium text-foreground shrink-0 w-28 truncate">{s.saro_no}</span>
+                          <span className="text-muted-foreground truncate flex-1">{s.pap || "—"}</span>
+                          <span className="text-muted-foreground truncate flex-1">{s.purpose || "—"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+        <DialogFooter className="border-t border-border justify-end">
+          <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Main page — one live-computed quarterly report per fund cluster tab
 // ─────────────────────────────────────────────────────────────────────────
 const NtcaBalancePage = () => {
@@ -296,13 +430,36 @@ const NtcaBalancePage = () => {
   const [saroFormCategoryId, setSaroFormCategoryId] = useState<number | null>(null);
   const [saroFormCategoryName, setSaroFormCategoryName] = useState<string | undefined>(undefined);
   const [editingSaro, setEditingSaro] = useState<NtcaBalanceSaroReport | null>(null);
+  const [overviewOpen, setOverviewOpen] = useState(false);
 
-  // ── Search + PAP/SARO filters — client-side, over whatever the current
-  // Year/Fund Cluster tab already loaded (mirrors the Dashboard's PAP/SARO
-  // filters; Year and Cluster already have their own controls above). ──
+  // ── Search + Category/PAP/SARO filters — client-side, over whatever the
+  // current Year/Fund Cluster tab already loaded (mirrors the Dashboard's
+  // PAP/SARO filters; Year and Cluster already have their own controls
+  // above). ──
   const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<number | "">("");
   const [papFilter, setPapFilter] = useState("");
   const [saroFilter, setSaroFilter] = useState("");
+
+  // Which of the 4 quarter columns to show — a display selection (which
+  // columns of the same underlying data are visible), not a row filter, so
+  // it's kept separate from hasActiveFilter/clearAllFilters below. At
+  // least one quarter always stays selected; toggling the last one back on
+  // is the only way out, same as every other multi-select-with-a-floor UI.
+  const [visibleQuarters, setVisibleQuarters] = useState<Set<number>>(new Set([0, 1, 2, 3]));
+  const quarterIndices = useMemo(
+    () => [0, 1, 2, 3].filter((i) => visibleQuarters.has(i)),
+    [visibleQuarters],
+  );
+  const toggleQuarter = (i: number) =>
+    setVisibleQuarters((prev) => {
+      if (prev.has(i) && prev.size === 1) return prev; // keep at least one selected
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  const pickQuarters = <T,>(arr: readonly T[]): T[] => quarterIndices.map((i) => arr[i]);
+  const gridTemplateColumns = buildGridTemplateColumns(quarterIndices.length);
 
   const load = async () => {
     setLoading(true);
@@ -367,6 +524,13 @@ const NtcaBalancePage = () => {
 
   const { selected, toggle, toggleAll, clear: clearSelection, isAllSelected, isSomeSelected } = useSelection<number>();
 
+  const categoryOptions = useMemo(() => {
+    if (!report) return [];
+    return report.categories
+      .map((c) => ({ id: c.id, name: c.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [report]);
+
   const papOptions = useMemo(() => {
     if (!report) return [];
     const map = new Map<string, string>();
@@ -383,21 +547,22 @@ const NtcaBalancePage = () => {
     return Array.from(set).sort();
   }, [report]);
 
-  const hasActiveFilter = !!searchQuery.trim() || !!papFilter || !!saroFilter;
+  const hasActiveFilter = !!searchQuery.trim() || !!categoryFilter || !!papFilter || !!saroFilter;
 
-  const clearAllFilters = () => { setSearchQuery(""); setPapFilter(""); setSaroFilter(""); };
+  const clearAllFilters = () => { setSearchQuery(""); setCategoryFilter(""); setPapFilter(""); setSaroFilter(""); };
 
   // Categories/rows for the currently loaded Year+Cluster report, narrowed
-  // by search/PAP/SARO — a category whose own name matches the search
-  // shows all of its (already PAP/SARO-filtered) rows; otherwise only rows
-  // that themselves match survive. Category-level totals in the header
-  // stay the server-computed whole-category figures either way — this only
-  // narrows which individual SARO rows are visible for lookup, it doesn't
-  // recompute a partial subtotal.
+  // by category/search/PAP/SARO — a category whose own name matches the
+  // search shows all of its (already category/PAP/SARO-filtered) rows;
+  // otherwise only rows that themselves match survive. Category-level
+  // totals in the header stay the server-computed whole-category figures
+  // either way — this only narrows which individual SARO rows are visible
+  // for lookup, it doesn't recompute a partial subtotal.
   const filteredCategories = useMemo(() => {
     if (!report) return [];
     const q = searchQuery.trim().toLowerCase();
     return report.categories
+      .filter((cat) => !categoryFilter || cat.id === categoryFilter)
       .map((cat) => {
         const nameMatches = q !== "" && cat.name.toLowerCase().includes(q);
         const saros = cat.saros.filter((s) => {
@@ -414,7 +579,7 @@ const NtcaBalancePage = () => {
         return { ...cat, saros };
       })
       .filter((cat) => cat.saros.length > 0 || !hasActiveFilter);
-  }, [report, searchQuery, papFilter, saroFilter, hasActiveFilter]);
+  }, [report, searchQuery, categoryFilter, papFilter, saroFilter, hasActiveFilter]);
 
   // Every SARO row across every category currently shown (not just expanded
   // ones) — "select all" and bulk delete act on the whole filtered table,
@@ -478,6 +643,15 @@ const NtcaBalancePage = () => {
         >
           {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        <QuarterDropdown visibleQuarters={visibleQuarters} onToggle={toggleQuarter} onSelectAll={() => setVisibleQuarters(new Set([0, 1, 2, 3]))} />
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value ? Number(e.target.value) : "")}
+          className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[200px]"
+        >
+          <option value="">All Categories</option>
+          {categoryOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
         <select
           value={papFilter}
           onChange={(e) => setPapFilter(e.target.value)}
@@ -513,6 +687,9 @@ const NtcaBalancePage = () => {
           />
         </div>
         <div className="flex gap-2 ml-auto sm:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => setOverviewOpen(true)}>
+            <ListTree className="w-4 h-4 mr-2" /> View Tagging
+          </Button>
           <Button variant="outline" className="text-foreground" onClick={handleDeleteAll}>
             <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
           </Button>
@@ -542,7 +719,7 @@ const NtcaBalancePage = () => {
             <div className="min-w-[2100px]">
               <div
                 className="grid gap-x-2 px-4 border-b border-border bg-muted/40 text-muted-foreground"
-                style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS, gridTemplateRows: "auto auto" }}
+                style={{ gridTemplateColumns, gridTemplateRows: "auto auto" }}
               >
                 {/* Leading columns span both header rows — one label, vertically centered */}
                 <span className="flex items-center" style={{ gridRow: "1 / span 2" }}>
@@ -558,17 +735,17 @@ const NtcaBalancePage = () => {
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>SARO No.</span>
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>Actions</span>
 
-                {/* Row 1 — group labels, each spanning its 4 quarter columns + total */}
-                <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: "span 5", gridRow: "1" }}>NTCA Received</span>
-                <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: "span 5", gridRow: "1" }}>Disbursements</span>
-                <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: "span 5", gridRow: "1" }}>NTCA Balance</span>
+                {/* Row 1 — group labels, each spanning its selected quarter columns + total */}
+                <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: `span ${quarterIndices.length + 1}`, gridRow: "1" }}>NTCA Received</span>
+                <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: `span ${quarterIndices.length + 1}`, gridRow: "1" }}>Disbursements</span>
+                <span className="text-center pt-2 pb-1 border-b border-border/70 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70" style={{ gridColumn: `span ${quarterIndices.length + 1}`, gridRow: "1" }}>NTCA Balance</span>
 
                 {/* Row 2 — the actual quarter/total labels under each group */}
-                {QUARTER_LABELS.map((q) => <span key={`r-${q}`} className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>{q}</span>)}
+                {pickQuarters(QUARTER_LABELS).map((q) => <span key={`r-${q}`} className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>{q}</span>)}
                 <span className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>Received Total</span>
-                {QUARTER_LABELS.map((q) => <span key={`d-${q}`} className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>{q}</span>)}
+                {pickQuarters(QUARTER_LABELS).map((q) => <span key={`d-${q}`} className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>{q}</span>)}
                 <span className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>Disb. Total</span>
-                {QUARTER_LABELS.map((q) => <span key={`b-${q}`} className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>{q}</span>)}
+                {pickQuarters(QUARTER_LABELS).map((q) => <span key={`b-${q}`} className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>{q}</span>)}
                 <span className="text-right pb-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "2" }}>Balance Total</span>
               </div>
 
@@ -584,7 +761,7 @@ const NtcaBalancePage = () => {
                   <div
                     onClick={() => toggleExpanded(cat.id)}
                     className="grid gap-x-2 px-4 py-2.5 border-b border-border items-center hover:bg-accent/30 transition-colors cursor-pointer bg-accent/10"
-                    style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}
+                    style={{ gridTemplateColumns }}
                   >
                     <span onClick={(e) => e.stopPropagation()}>
                       <SelectAllCheckbox
@@ -609,15 +786,15 @@ const NtcaBalancePage = () => {
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </span>
-                    {cat.received_quarters.map((v, i) => (
+                    {pickQuarters(cat.received_quarters).map((v, i) => (
                       <span key={i} className="text-xs font-medium text-foreground text-right">{formatMoney(v)}</span>
                     ))}
                     <span className="text-xs font-semibold text-foreground text-right">{formatMoney(cat.received_total)}</span>
-                    {cat.disbursed_quarters.map((v, i) => (
+                    {pickQuarters(cat.disbursed_quarters).map((v, i) => (
                       <span key={i} className="text-xs font-medium text-foreground text-right">{formatMoney(v)}</span>
                     ))}
                     <span className="text-xs font-semibold text-foreground text-right">{formatMoney(cat.disbursed_total)}</span>
-                    {cat.balance_quarters.map((v, i) => (
+                    {pickQuarters(cat.balance_quarters).map((v, i) => (
                       <span key={i} className={`text-xs font-medium text-right ${Number(v) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(v)}</span>
                     ))}
                     <span className={`text-xs font-semibold text-right ${Number(cat.balance_total) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(cat.balance_total)}</span>
@@ -627,7 +804,7 @@ const NtcaBalancePage = () => {
                     <div
                       key={s.id}
                       className="grid gap-x-2 px-4 py-2 border-b border-border items-center text-xs"
-                      style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}
+                      style={{ gridTemplateColumns }}
                     >
                       <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
                       <span />
@@ -642,15 +819,15 @@ const NtcaBalancePage = () => {
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </span>
-                      {s.received_quarters.map((v, i) => (
+                      {pickQuarters(s.received_quarters).map((v, i) => (
                         <span key={i} className="text-foreground text-right">{formatMoney(v)}</span>
                       ))}
                       <span className="text-foreground font-medium text-right">{formatMoney(s.received_total)}</span>
-                      {s.disbursed_quarters.map((v, i) => (
+                      {pickQuarters(s.disbursed_quarters).map((v, i) => (
                         <span key={i} className="text-foreground text-right">{formatMoney(v)}</span>
                       ))}
                       <span className="text-foreground font-medium text-right">{formatMoney(s.disbursed_total)}</span>
-                      {s.balance_quarters.map((v, i) => (
+                      {pickQuarters(s.balance_quarters).map((v, i) => (
                         <span key={i} className={`text-right ${Number(v) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(v)}</span>
                       ))}
                       <span className={`font-medium text-right ${Number(s.balance_total) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(s.balance_total)}</span>
@@ -662,18 +839,18 @@ const NtcaBalancePage = () => {
 
               <div
                 className="grid gap-x-2 px-4 py-3 bg-muted/40 items-center"
-                style={{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }}
+                style={{ gridTemplateColumns }}
               >
                 <span /><span /><span className="text-sm font-bold text-foreground">Total</span><span /><span /><span />
-                {report.totals.received_quarters.map((v, i) => (
+                {pickQuarters(report.totals.received_quarters).map((v, i) => (
                   <span key={i} className="text-xs font-bold text-foreground text-right">{formatMoney(v)}</span>
                 ))}
                 <span className="text-xs font-bold text-foreground text-right">{formatMoney(report.totals.received_total)}</span>
-                {report.totals.disbursed_quarters.map((v, i) => (
+                {pickQuarters(report.totals.disbursed_quarters).map((v, i) => (
                   <span key={i} className="text-xs font-bold text-foreground text-right">{formatMoney(v)}</span>
                 ))}
                 <span className="text-xs font-bold text-foreground text-right">{formatMoney(report.totals.disbursed_total)}</span>
-                {report.totals.balance_quarters.map((v, i) => (
+                {pickQuarters(report.totals.balance_quarters).map((v, i) => (
                   <span key={i} className={`text-xs font-bold text-right ${Number(v) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(v)}</span>
                 ))}
                 <span className={`text-xs font-bold text-right ${Number(report.totals.balance_total) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(report.totals.balance_total)}</span>
@@ -691,6 +868,13 @@ const NtcaBalancePage = () => {
       <SaroFormDialog
         open={saroFormOpen} onOpenChange={setSaroFormOpen} categoryId={saroFormCategoryId} categoryName={saroFormCategoryName}
         editing={editingSaro} saroList={saroList} fundCluster={fundCluster} onSaved={load}
+      />
+      <CategoryTaggingOverviewDialog
+        open={overviewOpen} onOpenChange={setOverviewOpen}
+        categories={filteredCategories}
+        clusterLabel={FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label ?? fundCluster}
+        year={year}
+        onAddSaro={openAddSaro}
       />
     </AdminLayout>
   );

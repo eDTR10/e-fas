@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ClipboardPaste, CheckCircle2, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ClipboardPaste, CheckCircle2, AlertTriangle, Pencil } from "lucide-react";
 import Swal from "sweetalert2";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -7,9 +7,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "../ui/dialog";
 import { Badge } from "../ui/badge";
+import { QuickFillSelect } from "../ui/quick-fill-select";
 import { NTCA, FundCluster, FUND_CLUSTER_OPTIONS } from "../../lib/ntcaApi";
 import { ntcaDisbursementApi, NtcaDisbursementBulkRow, NtcaDisbursement } from "../../lib/ntcaDisbursementApi";
-import { parseNtcaLedgerPaste, buildExistingAdaIndex, ParseResult, ParsedLedgerRow } from "../../lib/ntcaLedgerPaste";
+import {
+  parseNtcaLedgerPaste, buildExistingAdaIndex, ParseResult, ParsedLedgerRow, RowOverride,
+} from "../../lib/ntcaLedgerPaste";
 
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
@@ -63,6 +66,110 @@ function dominantMonth(rows: ParsedLedgerRow[]): { year: number; month: number }
   return { year, month: month - 1 };
 }
 
+// One NCA No. can span several NTCA tranches (see ntcaLedgerPaste.ts's own
+// pooling) — the dropdown only needs to offer each NCA No. once, not one
+// entry per tranche.
+function buildNcaOptions(ntcas: NTCA[], fundCluster: FundCluster): { nca_no: string; label: string }[] {
+  const seen = new Map<string, string>();
+  for (const ntca of ntcas) {
+    if (ntca.fund_cluster !== fundCluster || !ntca.nca_no) continue;
+    if (!seen.has(ntca.nca_no)) {
+      seen.set(ntca.nca_no, ntca.particulars || ntca.saro_no || "");
+    }
+  }
+  return Array.from(seen.entries())
+    .map(([nca_no, hint]) => ({ nca_no, label: hint ? `${nca_no} — ${hint}` : nca_no }))
+    .sort((a, b) => a.nca_no.localeCompare(b.nca_no, undefined, { numeric: true }));
+}
+
+// Full-row edit modal — every field the parser reads is editable here, not
+// just the NCA No., since a source sheet can leave any of them blank or
+// wrong (see the "Missing NCA number" rows this was built for). The NCA
+// field pairs a dropdown of every real NCA No. on file for this cluster
+// (QuickFillSelect — pick to fill, never has to track what's typed
+// afterward) with a manual text input, matching how every other dialog in
+// this app lets you pick-or-type a reference number.
+function EditRowDialog({
+  open, onOpenChange, row, ncaOptions, onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  row: ParsedLedgerRow | null;
+  ncaOptions: { nca_no: string; label: string }[];
+  onSave: (rowId: number, override: RowOverride) => void;
+}) {
+  const [date, setDate] = useState("");
+  const [ncaNo, setNcaNo] = useState("");
+  const [adaNo, setAdaNo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [particulars, setParticulars] = useState("");
+
+  useEffect(() => {
+    if (!open || !row) return;
+    setDate(row.date ?? "");
+    setNcaNo(row.normalizedNtca || row.rawNtca);
+    setAdaNo(row.rawAda);
+    setAmount(row.rawAmount);
+    setParticulars(row.particulars);
+  }, [open, row]);
+
+  const handleSave = () => {
+    if (!row) return;
+    onSave(row.rowId, {
+      rawDate: date,
+      rawNtca: ncaNo,
+      rawAda: adaNo,
+      rawAmount: amount,
+      particulars,
+    });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader className="border-b border-border">
+          <DialogTitle>Edit Row{row ? ` — #${row.adaNo || row.rawAda || row.rowNumber}` : ""}</DialogTitle>
+        </DialogHeader>
+        <div className="px-4 py-4 flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+            Date
+            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+            NCA No.
+            <QuickFillSelect
+              placeholder="Pick from existing NCAs…"
+              items={ncaOptions}
+              getLabel={(o) => o.label}
+              onPick={(o) => setNcaNo(o.nca_no)}
+            />
+            <Input value={ncaNo} onChange={(e) => setNcaNo(e.target.value)} placeholder="NCA No." />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+              ADA No.
+              <Input value={adaNo} onChange={(e) => setAdaNo(e.target.value)} placeholder="e.g. 510" />
+            </label>
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+              Amount
+              <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+            </label>
+          </div>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+            Particulars
+            <Input value={particulars} onChange={(e) => setParticulars(e.target.value)} />
+          </label>
+        </div>
+        <DialogFooter className="border-t border-border justify-end gap-2">
+          <Button variant="outline" className="text-foreground" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSave}>Save &amp; re-check</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function NtcaLedgerPasteImportDialog({
   open, onOpenChange, ntcas, fundCluster, existingDisbursements, onImported,
 }: {
@@ -85,8 +192,18 @@ export function NtcaLedgerPasteImportDialog({
   const [secondaryNcaNo, setSecondaryNcaNo] = useState("");
   const [result, setResult] = useState<ParseResult | null>(null);
   const [importing, setImporting] = useState(false);
+  // Manually-edited fields for specific rows, keyed by rowId (stable across
+  // re-parses — see ParsedLedgerRow.rowId) — for a row whose source sheet
+  // left a cell blank or wrong, rather than forcing a fix-and-re-paste
+  // round trip. Re-running the full parse with these applied (see
+  // reparse) means an edited row goes through the exact same pool/balance
+  // validation as any other, instead of just cosmetically patching the
+  // preview.
+  const [manualRowOverrides, setManualRowOverrides] = useState<Map<number, RowOverride>>(new Map());
+  const [editingRow, setEditingRow] = useState<ParsedLedgerRow | null>(null);
 
   const fundClusterLabel = FUND_CLUSTER_OPTIONS.find((o) => o.value === fundCluster)?.label ?? fundCluster;
+  const ncaOptions = useMemo(() => buildNcaOptions(ntcas, fundCluster), [ntcas, fundCluster]);
 
   const parsed = result?.rows ?? null;
   const ready = useMemo(() => (parsed ?? []).filter((r) => r.issues.length === 0), [parsed]);
@@ -97,6 +214,8 @@ export function NtcaLedgerPasteImportDialog({
     setText("");
     setSecondaryNcaNo("");
     setResult(null);
+    setManualRowOverrides(new Map());
+    setEditingRow(null);
   };
 
   // Goes back to the paste/NCA-field view without losing what's already
@@ -104,10 +223,19 @@ export function NtcaLedgerPasteImportDialog({
   // without having to re-paste the whole range from scratch.
   const backToEdit = () => setResult(null);
 
-  const handleParse = () => {
+  const reparse = (overrides: Map<number, RowOverride>) => {
     if (!text.trim()) return;
     const existingAdaIndex = buildExistingAdaIndex(existingDisbursements);
-    setResult(parseNtcaLedgerPaste(text, ntcas, fundCluster, existingAdaIndex, secondaryNcaNo));
+    setResult(parseNtcaLedgerPaste(text, ntcas, fundCluster, existingAdaIndex, secondaryNcaNo, overrides));
+  };
+
+  const handleParse = () => reparse(manualRowOverrides);
+
+  const saveRowOverride = (rowId: number, override: RowOverride) => {
+    const next = new Map(manualRowOverrides);
+    next.set(rowId, override);
+    setManualRowOverrides(next);
+    reparse(next);
   };
 
   const handleImport = async () => {
@@ -163,8 +291,9 @@ export function NtcaLedgerPasteImportDialog({
             Copy a range from your ledger sheet (e.g. "MDS-SPECIAL") — including the surrounding Balance Forwarded,
             Summary panel, and Sub-Total rows is fine, they're ignored automatically. Only the Date / NTCA / ADA /
             Amount detail block is detected and imported, matched against existing {fundClusterLabel} NCA records.
-            A row whose NCA hasn't been received/logged yet still imports as an <strong>advance disbursement</strong> —
-            flagged red below and on the page afterward, rather than being skipped.
+            A row whose NCA hasn't been received/logged yet — or has, but doesn't have enough balance to cover it —
+            still imports as an <strong>advance disbursement</strong> instead of being skipped, flagged red below and
+            on the page afterward. Any row can also be edited directly here before importing.
           </p>
 
           {!parsed && (
@@ -217,7 +346,7 @@ export function NtcaLedgerPasteImportDialog({
                 </span>
                 {advanceCount > 0 && (
                   <span className="inline-flex items-center gap-1 text-destructive">
-                    <AlertTriangle className="w-3.5 h-3.5" /> {advanceCount} advance (NCA not yet received)
+                    <AlertTriangle className="w-3.5 h-3.5" /> {advanceCount} advance (no NTCA / insufficient balance)
                   </span>
                 )}
                 {withIssues.length > 0 && (
@@ -251,34 +380,45 @@ export function NtcaLedgerPasteImportDialog({
                           <th className="px-2 py-1.5 text-right">Amount</th>
                           <th className="px-2 py-1.5">Particulars</th>
                           <th className="px-2 py-1.5">Status</th>
+                          <th className="px-2 py-1.5">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {parsed.map((row) => (
-                          <tr key={row.rowNumber} className={`border-t border-border ${row.issues.length > 0 || row.advance ? "bg-destructive/5" : ""}`}>
-                            <td className="px-2 py-1.5 whitespace-nowrap">{row.date ?? (row.rawDate || "—")}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{formatMonthLabel(row.date)}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap">
-                              {row.ntcaMatch ? (row.ntcaMatch.nca_no || row.ntcaMatch.ntca_no) : (row.rawNtca || "—")}
-                            </td>
-                            <td className="px-2 py-1.5 whitespace-nowrap">#{row.adaNo || "—"}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums">{formatMoney(row.amount)}</td>
-                            <td className="px-2 py-1.5 truncate max-w-[160px]">{row.particulars || "—"}</td>
-                            <td className="px-2 py-1.5">
-                              {row.issues.length > 0 ? (
-                                <span title={row.issues.join("; ")}>
-                                  <Badge variant="destructive">{row.issues[0]}</Badge>
+                        {parsed.map((row) => {
+                          const isOverridden = manualRowOverrides.has(row.rowId);
+                          return (
+                            <tr key={row.rowId} className={`border-t border-border ${row.issues.length > 0 || row.advance ? "bg-destructive/5" : ""}`}>
+                              <td className="px-2 py-1.5 whitespace-nowrap">{row.date ?? (row.rawDate || "—")}</td>
+                              <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">{formatMonthLabel(row.date)}</td>
+                              <td className="px-2 py-1.5 whitespace-nowrap">
+                                <span title={isOverridden ? "Manually edited" : undefined} className={isOverridden ? "underline decoration-dotted" : ""}>
+                                  {row.ntcaMatch ? (row.ntcaMatch.nca_no || row.ntcaMatch.ntca_no) : (row.normalizedNtca || row.rawNtca || "—")}
                                 </span>
-                              ) : row.advance ? (
-                                <span title="No NTCA record found for this NCA No. yet — will be imported as an advance disbursement.">
-                                  <Badge variant="destructive">Advance — NCA not received</Badge>
-                                </span>
-                              ) : (
-                                <Badge variant="success">Ready</Badge>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="px-2 py-1.5 whitespace-nowrap">#{row.adaNo || "—"}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{formatMoney(row.amount)}</td>
+                              <td className="px-2 py-1.5 truncate max-w-[160px]">{row.particulars || "—"}</td>
+                              <td className="px-2 py-1.5">
+                                {row.issues.length > 0 ? (
+                                  <span title={row.issues.join("; ")}>
+                                    <Badge variant="destructive">{row.issues[0]}</Badge>
+                                  </span>
+                                ) : row.advance ? (
+                                  <span title={row.advanceReason || "Will be imported as an advance disbursement."}>
+                                    <Badge variant="destructive">Advance</Badge>
+                                  </span>
+                                ) : (
+                                  <Badge variant="success">Ready</Badge>
+                                )}
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <button onClick={() => setEditingRow(row)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit this row">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -302,6 +442,14 @@ export function NtcaLedgerPasteImportDialog({
           )}
         </DialogFooter>
       </DialogContent>
+
+      <EditRowDialog
+        open={editingRow !== null}
+        onOpenChange={(next) => { if (!next) setEditingRow(null); }}
+        row={editingRow}
+        ncaOptions={ncaOptions}
+        onSave={saveRowOverride}
+      />
     </Dialog>
   );
 }

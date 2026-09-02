@@ -17,7 +17,25 @@ export interface ParseResult {
   secondaryNcaUsed: string | null;
 }
 
+// A row's manually-edited fields, as raw text — same shape/parsing rules
+// as a cell straight out of the pasted grid, so an edited row goes through
+// identical validation to any other. Keyed (in manualRowOverrides) by a
+// row's stable rowId, never by the display-only rowNumber, which can shift
+// if an edited date changes chronological sort order.
+export interface RowOverride {
+  rawDate?: string;
+  rawNtca?: string;
+  rawAda?: string;
+  rawAmount?: string;
+  particulars?: string;
+}
+
 export interface ParsedLedgerRow {
+  // Stable identity for this row across re-parses of the same pasted
+  // text — assigned before chronological sorting, so it doesn't shift even
+  // if editing this row's own date moves it elsewhere in rowNumber order.
+  // Use this (not rowNumber) as the key into manualRowOverrides.
+  rowId: number;
   rowNumber: number;
   rawDate: string;
   rawNtca: string;
@@ -26,15 +44,29 @@ export interface ParsedLedgerRow {
   particulars: string;
   date: string | null;
   ntcaMatch: NTCA | null;
+  // rawNtca's own NCA No. reduced to digits (e.g. "NTCA#0771" -> "771"),
+  // regardless of whether ntcaMatch ended up set — a row can correctly
+  // recognize which NCA it's for (this) while still failing to match
+  // (e.g. an insufficient-balance issue leaves ntcaMatch null), so the UI
+  // can show the same clean number a successfully-matched sibling row
+  // shows instead of falling back to the raw pasted text.
+  normalizedNtca: string;
   adaNo: string;
   amount: number | null;
   issues: string[];
-  // True when rawNtca doesn't match any NTCA record in this fund cluster at
-  // all — an "advance" disbursement, paid before its NCA has been received/
-  // logged yet. Unlike a real issue, this doesn't block import: the row is
-  // still sent, just with no `ntca` link (see NtcaDisbursement.ntca in the
-  // backend model) and rawNtca preserved for the UI to flag red.
+  // True when the money can't be fully explained by NCA-side records —
+  // no NTCA record for this NCA No. at all, or one exists but hasn't
+  // received enough (yet, or ever, as of this date) to cover it — an
+  // "advance" disbursement. Unlike a real issue, this doesn't block
+  // import: the row is still sent, just with no `ntca` link (see
+  // NtcaDisbursement.ntca in the backend model) and rawNtca preserved for
+  // the UI to flag red.
   advance: boolean;
+  // Human-readable explanation of why this row became an advance
+  // disbursement — only set when advance is true, shown as a tooltip/detail
+  // in the UI instead of the generic "NCA not received" wording, which
+  // isn't accurate for the "record exists but balance is short" case.
+  advanceReason?: string;
 }
 
 const HEADER_SCAN_WINDOW = 3;
@@ -229,6 +261,33 @@ function findSecondaryAdaBlocks(grid: string[][], excludeDateCol: number): Heade
   return blocks;
 }
 
+// A row's date is often written on only ONE of several parallel Date
+// columns (the primary block, or one of the secondary "Balance forwarded
+// /ADA" blocks sitting beside it) even though every block on that physical
+// row describes the same day — carrying a blank cell forward independently
+// per block misses this: a block that happens to start with several
+// blank-dated rows before its OWN Date column ever gets a value would
+// otherwise report "missing date" on all of them, even though a sibling
+// block's Date column, for those exact same rows, already establishes what
+// day it is. This resolves one shared, row-indexed date-carry pass across
+// every block up front, so each block's own extraction just looks up its
+// row's resolved date instead of tracking a separate, block-local "last
+// real date" that starts back at blank every time.
+function resolveRowDates(grid: string[][], header: HeaderMatch, secondaryHeaders: HeaderMatch[]): Map<number, string> {
+  const dateCols = [header.dateCol, ...secondaryHeaders.map((h) => h.dateCol)];
+  const rowDates = new Map<number, string>();
+  let carry = "";
+  for (let r = header.rowIndex + 1; r < grid.length; r++) {
+    const row = grid[r];
+    for (const col of dateCols) {
+      const cell = normalizeCell(row[col]);
+      if (cell) { carry = cell; break; }
+    }
+    rowDates.set(r, carry);
+  }
+  return rowDates;
+}
+
 function rowLooksLikeStop(row: string[], header: HeaderMatch): boolean {
   const anyCellStop = row.some((cell) => {
     const lower = normalizeCell(cell).toLowerCase();
@@ -249,14 +308,17 @@ interface RawRow {
   particulars: string;
 }
 
-function extractBlockRows(grid: string[][], header: HeaderMatch, ncaOverride?: string): RawRow[] {
+function extractBlockRows(
+  grid: string[][],
+  header: HeaderMatch,
+  rowDates: Map<number, string>,
+  ncaOverride?: string,
+): RawRow[] {
   const rows: RawRow[] = [];
-  let lastDate = "";
   for (let r = header.rowIndex + 1; r < grid.length; r++) {
     const row = grid[r];
     if (rowLooksLikeStop(row, header)) break;
 
-    const rawDate = normalizeCell(row[header.dateCol]);
     const rawNtca = ncaOverride ?? normalizeCell(row[header.ntcaCol]);
     const rawAda = normalizeCell(row[header.adaCol]);
     const rawAmount = normalizeCell(row[header.amountCol]);
@@ -265,10 +327,11 @@ function extractBlockRows(grid: string[][], header: HeaderMatch, ncaOverride?: s
     const isEmpty = ncaOverride ? (!rawAda && !rawAmount) : (!rawNtca && !rawAda && !rawAmount);
     if (isEmpty) continue;
 
-    // Date is merged/blank on continuation rows in the source sheet —
-    // carry the last real date forward rather than treating it as missing.
-    const effectiveRawDate = rawDate || lastDate;
-    if (rawDate) lastDate = rawDate;
+    // Date is merged/blank on continuation rows in the source sheet, and
+    // sometimes never written at all in THIS block's own column even on
+    // its first rows — resolveRowDates already worked out the right date
+    // per row across every block, so just look it up here.
+    const effectiveRawDate = rowDates.get(r) ?? "";
 
     rows.push({ effectiveRawDate, rawNtca, rawAda, rawAmount, particulars });
   }
@@ -303,6 +366,14 @@ export function parseNtcaLedgerPaste(
   // NCA No. to assume for a second Date/ADA block with no NTCA column of
   // its own, if the pasted range has one — see findSecondaryAdaBlocks.
   secondaryBlockNcaNo?: string,
+  // Manually-edited fields for specific rows, keyed by rowId (see
+  // ParsedLedgerRow.rowId — NOT the display rowNumber) — lets the UI edit
+  // a row whose source sheet left a cell blank or wrong (missing NCA No.,
+  // bad date, ...) without having to fix the sheet and re-paste. Merged in
+  // before sorting/matching, so an overridden row — including one whose
+  // edited date moves it to a different point in the batch simulation —
+  // goes through the exact same pool/balance validation as any other.
+  manualRowOverrides?: Map<number, RowOverride>,
 ): ParseResult {
   const grid = text
     .replace(/\r\n/g, "\n")
@@ -345,7 +416,15 @@ export function parseNtcaLedgerPaste(
     }
   }
 
-  const rawRows: RawRow[] = extractBlockRows(grid, header);
+  // Found up front (rather than after the primary block is extracted) so
+  // resolveRowDates can see every parallel Date column before any block's
+  // rows get pulled — a block that starts with several blank-dated rows
+  // still needs to know what a sibling block's Date column says for those
+  // exact same rows.
+  const secondaryHeaders = findSecondaryAdaBlocks(grid, header.dateCol);
+  const rowDates = resolveRowDates(grid, header, secondaryHeaders);
+
+  const rawRows: RawRow[] = extractBlockRows(grid, header, rowDates);
 
   // A headerless secondary block (see findSecondaryAdaBlocks) has no NCA
   // No. of its own to read — default to whichever NCA No. is dominant in
@@ -370,8 +449,7 @@ export function parseNtcaLedgerPaste(
   }
   const effectiveSecondaryNca = (secondaryBlockNcaNo?.trim()) || dominantNca || "";
 
-  const secondaryHeaders = findSecondaryAdaBlocks(grid, header.dateCol);
-  const secondaryRowSets = secondaryHeaders.map((h) => extractBlockRows(grid, h, effectiveSecondaryNca || " "));
+  const secondaryRowSets = secondaryHeaders.map((h) => extractBlockRows(grid, h, rowDates, effectiveSecondaryNca || " "));
 
   let undetectedSecondaryBlocks = 0;
   let undetectedSecondaryRows = 0;
@@ -389,16 +467,31 @@ export function parseNtcaLedgerPaste(
   // Two blocks' rows need to interleave by actual date, not "all of block
   // 1 then all of block 2" — the pool simulation and ADA-duplicate check
   // below both depend on processing rows in the order the money actually
-  // moved, regardless of which block a row physically came from.
+  // moved, regardless of which block a row physically came from. Manual
+  // overrides are merged in right here, before the date is even parsed —
+  // an edited date needs to affect sort order too, not just the row's own
+  // display, so it can't be applied any later than this.
   const orderedRows = rawRows
-    .map((row, originalIndex) => ({ row, originalIndex, parsedDate: parseLedgerDate(row.effectiveRawDate) }))
+    .map((row, originalIndex) => {
+      const override = manualRowOverrides?.get(originalIndex);
+      const merged: RawRow = override
+        ? {
+            effectiveRawDate: override.rawDate ?? row.effectiveRawDate,
+            rawNtca: override.rawNtca ?? row.rawNtca,
+            rawAda: override.rawAda ?? row.rawAda,
+            rawAmount: override.rawAmount ?? row.rawAmount,
+            particulars: override.particulars ?? row.particulars,
+          }
+        : row;
+      return { row: merged, originalIndex, parsedDate: parseLedgerDate(merged.effectiveRawDate) };
+    })
     .sort((a, b) => (a.parsedDate ?? "").localeCompare(b.parsedDate ?? "") || a.originalIndex - b.originalIndex);
 
   const results: ParsedLedgerRow[] = [];
   const usedAdaByYear = new Map<number, Set<string>>();
   let rowNumber = 0;
 
-  for (const { row, parsedDate } of orderedRows) {
+  for (const { row, originalIndex, parsedDate } of orderedRows) {
     const { effectiveRawDate, rawNtca, rawAda, rawAmount, particulars } = row;
     rowNumber += 1;
     const date = parsedDate;
@@ -439,24 +532,45 @@ export function parseNtcaLedgerPaste(
     }
 
     const issues: string[] = [];
-    // Genuinely no NTCA record for this NCA No. yet is NOT a blocker — the
-    // row still imports as an advance disbursement (see the `advance` flag
-    // on ParsedLedgerRow). A record that *does* exist but can't cover the
-    // amount (not received yet as of this date, or insufficient overall)
-    // stays a real, blocking issue — that's an actual balance problem, not
-    // just a timing/ordering one.
+    // A row whose money can't be fully explained by NCA-side records —
+    // whether there's genuinely no NTCA record for it at all, or one
+    // exists but hasn't received enough (yet, or ever, as of this date) to
+    // cover it — is NOT a blocker. The disbursement clearly still
+    // happened (the sheet says so), it's just short on the receiving end,
+    // so it imports as an advance disbursement the same way a totally
+    // unmatched NCA does (see the `advance` flag on ParsedLedgerRow),
+    // rather than being silently dropped from the import and making the
+    // month's totals incomplete. Only real blockers — an unparseable row,
+    // or a duplicate ADA number — stay hard issues.
     let advance = false;
+    let advanceReason: string | undefined;
     if (!effectiveRawDate || !date) issues.push("Missing or unparseable date");
     if (!rawNtca) issues.push("Missing NCA number");
-    else if (!pool) advance = true;
-    else if (adaDuplicateYear !== null) { /* reported below, don't also report a balance issue for a row that was never simulated */ }
-    else if (!ntcaMatch && date && availableAsOfDate <= 0) issues.push(`NCA "${rawNtca}" wasn't received yet as of ${date}`);
-    else if (!ntcaMatch && date) issues.push(`NCA "${rawNtca}" doesn't have enough combined balance left as of ${date}`);
+    else if (!pool) {
+      advance = true;
+      advanceReason = `No NTCA record found yet for NCA "${rawNtca}".`;
+    } else if (adaDuplicateYear !== null) { /* reported below, don't also report a balance issue for a row that was never simulated */ }
+    else if (!ntcaMatch && date && availableAsOfDate <= 0) {
+      advance = true;
+      advanceReason = `NCA "${rawNtca}" hasn't received any NTCA as of ${date} yet.`;
+    } else if (!ntcaMatch && date) {
+      // Named numbers, not just "insufficient" — availableAsOfDate already
+      // has every earlier same-batch row's draw against this pool
+      // subtracted, so this is exactly what's left for THIS row to check
+      // against, not the pool's original total.
+      const shortfall = (amount ?? 0) - availableAsOfDate;
+      const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      advance = true;
+      advanceReason =
+        `NCA "${rawNtca}" only has ${fmt(availableAsOfDate)} left as of ${date} ` +
+        `(after earlier rows in this batch), short of the ${fmt(amount ?? 0)} needed by ${fmt(shortfall)}.`;
+    }
     if (adaDuplicateYear !== null) issues.push(`ADA number "${rawAda}" is already used in ${adaDuplicateYear}`);
     if (!rawAda) issues.push("Missing ADA number");
     if (amount === null || amount <= 0) issues.push("Missing or invalid amount");
 
     results.push({
+      rowId: originalIndex,
       rowNumber,
       rawDate: effectiveRawDate,
       rawNtca,
@@ -465,10 +579,12 @@ export function parseNtcaLedgerPaste(
       particulars,
       date,
       ntcaMatch,
+      normalizedNtca,
       adaNo,
       amount,
       issues,
       advance,
+      advanceReason,
     });
   }
 
