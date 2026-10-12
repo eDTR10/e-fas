@@ -1,0 +1,1 @@
+function l(t){const a=new Map;return t.forEach(e=>a.set(e.name.trim().toLowerCase(),(a.get(e.name.trim().toLowerCase())||0)+1)),t.map(e=>({...e,label:(a.get(e.name.trim().toLowerCase())||0)>1?`${e.name} — ${e.code}`:e.name})).sort((e,r)=>e.label.localeCompare(r.label))}export{l};
