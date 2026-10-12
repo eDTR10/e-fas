@@ -1,3 +1,5 @@
+import { labelPapOptions } from "../../lib/papLabel";
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2, Search, ListTree,
@@ -26,6 +28,7 @@ import { receivedSaroApi, ReceivedSARO } from "../../lib/receivedSaroApi";
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
@@ -56,8 +59,13 @@ const QUARTER_LABELS = ["1st Qtr", "2nd Qtr", "3rd Qtr", "4th Qtr"];
 // hiding a quarter column (see visibleQuarters) removes it from the grid
 // entirely rather than just visually blanking it, so the table narrows
 // instead of leaving empty space.
-const buildGridTemplateColumns = (quarterCount: number) =>
-  "24px 24px minmax(160px, 1.3fr) minmax(200px, 1.6fr) minmax(110px, 1fr) 104px " +
+// Purpose and SARO No. columns only exist while some category is expanded —
+// collapsed, the table shows just the PAP/category name and the figures.
+const buildGridTemplateColumns = (quarterCount: number, showDetail: boolean) =>
+  "24px 24px " +
+  (showDetail
+    ? "minmax(160px, 1.3fr) minmax(200px, 1.6fr) minmax(110px, 1fr) 104px "
+    : "minmax(260px, 2fr) 104px ") +
   `repeat(${quarterCount}, 90px) 100px repeat(${quarterCount}, 90px) 100px repeat(${quarterCount}, 90px) 100px`;
 
 const formatMoney = (value: string | number | null | undefined): string => {
@@ -459,7 +467,6 @@ const NtcaBalancePage = () => {
       return next;
     });
   const pickQuarters = <T,>(arr: readonly T[]): T[] => quarterIndices.map((i) => arr[i]);
-  const gridTemplateColumns = buildGridTemplateColumns(quarterIndices.length);
 
   const load = async () => {
     setLoading(true);
@@ -589,6 +596,9 @@ const NtcaBalancePage = () => {
     [filteredCategories]
   );
 
+  const showDetail = hasActiveFilter || filteredCategories.some((c) => expanded.has(c.id));
+  const gridTemplateColumns = buildGridTemplateColumns(quarterIndices.length, showDetail);
+
   const handleBulkDelete = async () => {
     const count = selected.size;
     const result = await Swal.fire({
@@ -658,7 +668,7 @@ const NtcaBalancePage = () => {
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
         >
           <option value="">All PAP / Projects</option>
-          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+          {labelPapOptions(papOptions).map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
         </select>
         <select
           value={saroFilter}
@@ -675,8 +685,8 @@ const NtcaBalancePage = () => {
         )}
       </div>
 
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -686,12 +696,12 @@ const NtcaBalancePage = () => {
             className="w-full pl-9 pr-4 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={() => setOverviewOpen(true)}>
-            <ListTree className="w-4 h-4 mr-2" /> View Tagging
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => setOverviewOpen(true)} title="View Tagging" aria-label="View Tagging">
+            <ListTree className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">View Tagging</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll}>
-            <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} title="Delete All" aria-label="Delete All">
+            <AlertTriangle className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Delete All</span>
           </Button>
           <Button onClick={openAddCategory}>
             <Plus className="w-4 h-4 mr-2" /> Add Category
@@ -714,7 +724,100 @@ const NtcaBalancePage = () => {
           <button onClick={clearAllFilters} className="text-primary underline">Clear filters</button>
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <>
+        {/* Phones: the 15-column matrix is unreadable, so show one card per category with its totals, expandable to quarters + SAROs */}
+        <div className="hidden sm:flex flex-col gap-3">
+          {filteredCategories.map((cat) => {
+            const isExpanded = expanded.has(cat.id) || hasActiveFilter;
+            const totalCell = (label: string, value: string, negativeRed = false) => (
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                <p className={`text-sm font-semibold break-words ${negativeRed && Number(value) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(value)}</p>
+              </div>
+            );
+            const quarterTable = (rec: readonly string[], dis: readonly string[], bal: readonly string[]) => (
+              <div className="mt-2 overflow-x-auto rounded-md border border-border">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-muted/40 text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1 text-left font-semibold" />
+                      {quarterIndices.map((i) => <th key={i} className="px-2 py-1 text-right font-semibold uppercase">{QUARTER_LABELS[i]}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {([["Received", rec, false], ["Disbursed", dis, false], ["Balance", bal, true]] as const).map(([label, arr, red]) => (
+                      <tr key={label} className="border-t border-border">
+                        <td className="px-2 py-1 font-medium text-muted-foreground">{label}</td>
+                        {quarterIndices.map((i) => (
+                          <td key={i} className={`px-2 py-1 text-right ${red && Number(arr[i]) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(arr[i])}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+            return (
+              <div key={cat.id} className="rounded-xl border border-border bg-card">
+                <div className="flex items-start gap-2 p-3" onClick={() => toggleExpanded(cat.id)}>
+                  <span className="mt-1 text-muted-foreground">{isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0"><CategoryChip label={cat.name} /></span>
+                      <span className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => openAddSaro(cat.id, cat.name)} className="p-2 rounded text-muted-foreground hover:bg-accent" aria-label="Tag a SARO"><Plus className="w-4 h-4" /></button>
+                        <button onClick={() => openEditCategory(cat)} className="p-2 rounded text-muted-foreground hover:bg-accent" aria-label="Edit category"><Pencil className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteCategory(cat)} className="p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete category"><Trash2 className="w-4 h-4" /></button>
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {totalCell("Received", cat.received_total)}
+                      {totalCell("Disbursed", cat.disbursed_total)}
+                      {totalCell("Balance", cat.balance_total, true)}
+                    </div>
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div className="border-t border-border px-3 pb-3">
+                    {quarterTable(cat.received_quarters, cat.disbursed_quarters, cat.balance_quarters)}
+                    <div className="mt-3 flex flex-col gap-2">
+                      {cat.saros.length === 0 && <p className="text-xs text-muted-foreground">No SARO tagged yet.</p>}
+                      {cat.saros.map((sa) => (
+                        <div key={sa.id} className="rounded-lg border border-border bg-background/50 p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground break-words">{sa.pap || "—"}</p>
+                              <p className="text-xs text-muted-foreground break-words">{sa.saro_no}{sa.purpose ? ` · ${sa.purpose}` : ""}</p>
+                            </div>
+                            <span className="flex shrink-0 items-center gap-0.5">
+                              <button onClick={() => openEditSaro(cat.id, cat.name, sa)} className="p-2 rounded text-muted-foreground hover:bg-accent" aria-label="Edit SARO"><Pencil className="w-4 h-4" /></button>
+                              <button onClick={() => handleDeleteSaro(sa)} className="p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Untag SARO"><Trash2 className="w-4 h-4" /></button>
+                            </span>
+                          </div>
+                          <div className="mt-1.5 grid grid-cols-3 gap-2">
+                            {totalCell("Received", sa.received_total)}
+                            {totalCell("Disbursed", sa.disbursed_total)}
+                            {totalCell("Balance", sa.balance_total, true)}
+                          </div>
+                          {quarterTable(sa.received_quarters, sa.disbursed_quarters, sa.balance_quarters)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="rounded-xl border-2 border-border bg-muted/40 p-3">
+            <p className="text-xs font-bold uppercase text-foreground">Total</p>
+            <div className="mt-1 grid grid-cols-3 gap-2">
+              <div><p className="text-[10px] uppercase text-muted-foreground">Received</p><p className="text-sm font-bold text-foreground break-words">{formatMoney(report.totals.received_total)}</p></div>
+              <div><p className="text-[10px] uppercase text-muted-foreground">Disbursed</p><p className="text-sm font-bold text-foreground break-words">{formatMoney(report.totals.disbursed_total)}</p></div>
+              <div><p className="text-[10px] uppercase text-muted-foreground">Balance</p><p className={`text-sm font-bold break-words ${Number(report.totals.balance_total) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(report.totals.balance_total)}</p></div>
+            </div>
+          </div>
+        </div>
+        <div className="bg-card border border-border rounded-xl overflow-hidden sm:hidden">
           <div className="overflow-x-auto">
             <div className="min-w-[2100px]">
               <div
@@ -731,8 +834,12 @@ const NtcaBalancePage = () => {
                 </span>
                 <span style={{ gridRow: "1 / span 2" }} />
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>PAP</span>
-                <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>Purpose</span>
-                <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>SARO No.</span>
+                {showDetail && (
+                  <>
+                    <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>Purpose</span>
+                    <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>SARO No.</span>
+                  </>
+                )}
                 <span className="flex items-center py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ gridRow: "1 / span 2" }}>Actions</span>
 
                 {/* Row 1 — group labels, each spanning its selected quarter columns + total */}
@@ -774,15 +881,15 @@ const NtcaBalancePage = () => {
                       {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </span>
                     <span className="min-w-0"><CategoryChip label={cat.name} /></span>
-                    <span /><span />
+                    {showDetail && <><span /><span /></>}
                     <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => openAddSaro(cat.id, cat.name)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Tag a SARO">
+                      <button onClick={() => openAddSaro(cat.id, cat.name)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Tag a SARO">
                         <Plus className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => openEditCategory(cat)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit category">
+                      <button onClick={() => openEditCategory(cat)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit category">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDeleteCategory(cat)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete category">
+                      <button onClick={() => handleDeleteCategory(cat)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete category">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </span>
@@ -812,10 +919,10 @@ const NtcaBalancePage = () => {
                       <span className="text-muted-foreground truncate" title={s.purpose}>{s.purpose || "—"}</span>
                       <span className="text-muted-foreground truncate">{s.saro_no}</span>
                       <span className="flex items-center gap-0.5">
-                        <button onClick={() => openEditSaro(cat.id, cat.name, s)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit SARO">
+                        <button onClick={() => openEditSaro(cat.id, cat.name, s)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit SARO">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleDeleteSaro(s)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Untag SARO">
+                        <button onClick={() => handleDeleteSaro(s)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Untag SARO">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </span>
@@ -841,7 +948,7 @@ const NtcaBalancePage = () => {
                 className="grid gap-x-2 px-4 py-3 bg-muted/40 items-center"
                 style={{ gridTemplateColumns }}
               >
-                <span /><span /><span className="text-sm font-bold text-foreground">Total</span><span /><span /><span />
+                <span /><span /><span className="text-sm font-bold text-foreground">Total</span>{showDetail && <><span /><span /></>}<span />
                 {pickQuarters(report.totals.received_quarters).map((v, i) => (
                   <span key={i} className="text-xs font-bold text-foreground text-right">{formatMoney(v)}</span>
                 ))}
@@ -858,6 +965,7 @@ const NtcaBalancePage = () => {
             </div>
           </div>
         </div>
+        </>
       )}
 
       <CategoryFormDialog

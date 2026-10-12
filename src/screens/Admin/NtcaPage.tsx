@@ -1,3 +1,5 @@
+import { labelPapOptions } from "../../lib/papLabel";
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import {
   Search, Plus, Upload, Trash2, Pencil, Archive, ArchiveRestore, Link2, Link2Off,
   FileText, AlertTriangle, Settings, Scale, ChevronDown, ChevronRight,
@@ -88,6 +90,7 @@ const formatDate = (value: string | null | undefined): string => {
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const error = err as {
     code?: string;
     message?: string;
@@ -419,7 +422,7 @@ function NtcaImportDialog({
                 </div>
               )}
               <div className="border border-border rounded-lg overflow-hidden max-h-[55vh] overflow-y-auto">
-                <div className="grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
+                <div className="grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0 sm:hidden">
                   <span />
                   <span>NTCA No. / Particulars</span>
                   <span>SARO No.</span>
@@ -427,7 +430,7 @@ function NtcaImportDialog({
                   <span>SARO Match</span>
                 </div>
                 {rows.map((r, i) => (
-                  <div key={i} className={`grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate ? "opacity-60" : ""}`}>
+                  <div key={i} className={`grid grid-cols-[24px_1fr_150px_120px_auto] sm:grid-cols-[24px_1fr] sm:gap-y-1 gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate ? "opacity-60" : ""}`}>
                     <input
                       type="checkbox"
                       checked={r.included}
@@ -441,14 +444,14 @@ function NtcaImportDialog({
                         {r.is_duplicate && " · looks already imported"}
                       </p>
                     </div>
-                    <span className="text-xs text-foreground truncate">{r.saro_no || "—"}</span>
-                    <span className="text-xs text-foreground">{formatMoney(r.amount)}</span>
+                    <span className="text-xs text-foreground truncate sm:col-start-2">SARO {r.saro_no || "—"}</span>
+                    <span className="text-xs text-foreground sm:col-start-2">{formatMoney(r.amount)}</span>
                     {r.saro_match ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 w-fit">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 w-fit sm:col-start-2">
                         <Link2 className="w-3 h-3" /> #{r.saro_match.id} {r.saro_match.pap_name || r.saro_match.saro_no}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground w-fit">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground w-fit sm:col-start-2">
                         <Link2Off className="w-3 h-3" /> No SARO — will be unlinked
                       </span>
                     )}
@@ -484,6 +487,8 @@ const NtcaPage = () => {
   const [viewing, setViewing] = useState<NTCA | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  // "Sync Sheets" opens the Sheet Setup dialog straight on its review step (same flow as Bulk Import).
+  const [sheetSyncAuto, setSheetSyncAuto] = useState(false);
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -737,7 +742,7 @@ const NtcaPage = () => {
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
         >
           <option value="">All PAP / Projects</option>
-          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+          {labelPapOptions(papOptions).map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
         </select>
         <select
           value={fundClusterFilter}
@@ -750,8 +755,8 @@ const NtcaPage = () => {
         </select>
       </DateRangeFilterBar>
 
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -765,19 +770,19 @@ const NtcaPage = () => {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={handleSync} disabled={syncing} title="Sync from Google Sheets">
-            <Settings className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Syncing…' : 'Sync Sheets'}
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(true); setSheetSetupOpen(true); }} title="Sync from Google Sheets — review the rows before saving">
+            <Settings className={`w-4 h-4 mr-2 slg:mr-0 ${syncing ? 'animate-spin' : ''}`} />
+            <span className="slg:hidden">{syncing ? 'Syncing…' : 'Sync Sheets'}</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Manage Google Sheet sources">
-            <Link2 className="w-4 h-4 mr-2" /> Sheet Setup
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(false); setSheetSetupOpen(true); }} title="Manage Google Sheet sources">
+            <Link2 className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Sheet Setup</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-2" /> Bulk Import
+          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)} title="Bulk Import" aria-label="Bulk Import">
+            <Upload className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Bulk Import</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0}>
-            <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0} title="Delete All" aria-label="Delete All">
+            <AlertTriangle className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Delete All</span>
           </Button>
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add Entry
@@ -789,13 +794,14 @@ const NtcaPage = () => {
       <KpiStrip cards={[
         {
           title: "Total NTCA",
+          subtitle: 'Sheet column: "NTCA NO." (row count)',
           value: String(filtered.length),
           caption: filtered.length === entries.length ? undefined : `of ${entries.length} loaded`,
           icon: Scale,
         },
-        { title: "Total NTCA Amount", value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount || 0), 0)), icon: FileText },
-        { title: "Linked to SARO", value: String(filtered.filter((x) => x.saro_no && saroById.has(x.saro_no)).length), caption: `${filtered.length} total`, icon: Link2 },
-        { title: "Unlinked NTCA", value: String(filtered.filter((x) => !x.saro_no || !saroById.has(x.saro_no)).length), icon: Link2Off },
+        { title: "Total NTCA Amount", subtitle: 'Sheet column: "NTCA AMOUNT"', value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount || 0), 0)), icon: FileText },
+        { title: "Linked to SARO", subtitle: 'Sheet column: "SARO NO." matched to Received SARO', value: String(filtered.filter((x) => x.saro_no && saroById.has(x.saro_no)).length), caption: `${filtered.length} total`, icon: Link2 },
+        { title: "Unlinked NTCA", subtitle: 'Sheet column: "SARO NO." with no match', value: String(filtered.filter((x) => !x.saro_no || !saroById.has(x.saro_no)).length), icon: Link2Off },
       ]} />
 
       <BulkActionBar
@@ -824,7 +830,7 @@ const NtcaPage = () => {
       ) : (
         <div>
           <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[24px_1.2fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_1.2fr_1fr_auto]">
+            <div className="grid grid-cols-[24px_1.2fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_1.2fr_1fr_auto]">
               <SelectAllCheckbox checked={isAllSelected(pageIds)} indeterminate={isSomeSelected(pageIds)} onChange={() => toggleAll(pageIds)} />
               <SortFilterHeader label="NTCA No." sortKey="ntca_no" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
                 filterValue={columnFilters.ntca_no || ""} onFilterChange={(v) => setColumnFilter("ntca_no", v)} filterPlaceholder="Filter…" />
@@ -854,7 +860,7 @@ const NtcaPage = () => {
                   <div
                     key={n.id}
                     onClick={() => setViewing(n)}
-                    className="grid grid-cols-[24px_1.2fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 py-3.5 border-b border-border last:border-0 items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_1.2fr_1fr_auto] cursor-pointer"
+                    className="grid grid-cols-[24px_1.2fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 sm:gap-2 sm:px-3 py-3.5 border-b border-border last:border-0 items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_1.2fr_1fr_auto] cursor-pointer"
                   >
                     <input
                       type="checkbox"
@@ -863,7 +869,7 @@ const NtcaPage = () => {
                       onClick={(e) => e.stopPropagation()}
                     />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
+                      <p className="text-sm font-medium text-foreground truncate sm:whitespace-normal sm:break-words">
                         {n.ntca_no}
                         {n.is_archived && <Badge variant="destructive" className="ml-2">archived</Badge>}
                       </p>
@@ -891,13 +897,13 @@ const NtcaPage = () => {
                     </div>
                     <p className="text-sm font-medium text-foreground">{formatMoney(n.amount)}</p>
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => handleEdit(n)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                      <button onClick={() => handleEdit(n)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleArchiveToggle(n)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={n.is_archived ? "Unarchive" : "Archive"}>
+                      <button onClick={() => handleArchiveToggle(n)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={n.is_archived ? "Unarchive" : "Archive"}>
                         {n.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                       </button>
-                      <button onClick={() => handleDelete(n)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                      <button onClick={() => handleDelete(n)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -936,7 +942,7 @@ const NtcaPage = () => {
         open={!!viewing}
         onOpenChange={(open) => !open && setViewing(null)}
       />
-      <SheetSyncManagerDialog open={sheetSetupOpen} onOpenChange={setSheetSetupOpen} table="received_ntca" label="Received NTCA" onSynced={load} />
+      <SheetSyncManagerDialog open={sheetSetupOpen} autoPreview={sheetSyncAuto} onOpenChange={setSheetSetupOpen} table="received_ntca" label="Received NTCA" onSynced={load} />
     </AdminLayout>
   );
 };

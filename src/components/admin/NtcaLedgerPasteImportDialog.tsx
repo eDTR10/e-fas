@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardPaste, CheckCircle2, AlertTriangle, Pencil } from "lucide-react";
 import Swal from "sweetalert2";
@@ -17,6 +18,7 @@ import {
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const axiosErr = err as { response?: { data?: Record<string, unknown> }; message?: string };
   const data = axiosErr?.response?.data;
   if (!data) {

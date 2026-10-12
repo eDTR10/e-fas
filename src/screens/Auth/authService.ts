@@ -2,6 +2,7 @@ import axios from "axios";
 import {
   finishTrackedOperation,
   getTrackedOperationLabel,
+  OPERATION_CANCELLED_MESSAGE,
   OperationTrackedConfig,
   startTrackedOperation,
 } from "../../lib/operationProgress";
@@ -38,6 +39,12 @@ api.interceptors.response.use(
   },
   (error) => {
     finishTrackedOperation(error.config as OperationTrackedConfig | undefined);
+    // The user pressed Cancel on the progress overlay — give every caller a
+    // readable message instead of axios' bare "canceled".
+    if (axios.isCancel(error)) {
+      error.message = OPERATION_CANCELLED_MESSAGE;
+      return Promise.reject(error);
+    }
     if (error.response?.status === 401) {
       localStorage.removeItem("auth_token");
       if (window.location.pathname !== LOGIN_URL) {

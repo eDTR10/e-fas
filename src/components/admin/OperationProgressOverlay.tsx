@@ -5,6 +5,7 @@ import {
   OPERATION_STARTED_EVENT,
   OperationFinishedDetail,
   OperationStartedDetail,
+  cancelTrackedOperation,
 } from "../../lib/operationProgress";
 
 type ActiveOperation = OperationStartedDetail & { startedAt: number };
@@ -88,6 +89,16 @@ export function OperationProgressOverlay() {
         </div>
         <div className="border-t border-border bg-muted/30 px-6 py-3 text-[11px] leading-relaxed text-muted-foreground">
           Large sheets may take a few minutes. This window will close automatically when processing finishes.
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="min-w-0">Cancel stops waiting, but the server may still finish what it started.</span>
+            <button
+              type="button"
+              onClick={() => cancelTrackedOperation(current.id)}
+              className="shrink-0 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>

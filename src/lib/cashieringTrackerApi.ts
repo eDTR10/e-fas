@@ -102,10 +102,11 @@ export const cashieringTrackerApi = {
     return data;
   },
 
-  confirmImport: async (rows: CashieringTrackerImportRow[]): Promise<CashieringTrackerImportResult> => {
+  confirmImport: async (rows: CashieringTrackerImportRow[], upsert = false): Promise<CashieringTrackerImportResult> => {
     const { data } = await api.post<CashieringTrackerImportResult>(`${BASE}/bulk_import/`, {
       rows,
       dry_run: "false",
+      ...(upsert ? { upsert: "true" } : {}),
     });
     return data;
   },

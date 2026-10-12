@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
   Search, Plus, Upload, Trash2, Pencil, FileText, Wallet, Scale, AlertTriangle,
@@ -39,6 +40,7 @@ import { toNumber } from "../../lib/formatters";
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
@@ -398,7 +400,7 @@ function DisbursementImportDialog({
                 </div>
               )}
               <div className="border border-border rounded-lg overflow-hidden max-h-[55vh] overflow-y-auto">
-                <div className="grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
+                <div className="grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0 sm:hidden">
                   <span />
                   <span>DV No. / Claimant</span>
                   <span>Fund Source</span>
@@ -406,7 +408,7 @@ function DisbursementImportDialog({
                   <span>Status</span>
                 </div>
                 {rows.map((r, i) => (
-                  <div key={i} className={`grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate || r.missing_required ? "opacity-60" : ""}`}>
+                  <div key={i} className={`grid grid-cols-[24px_1fr_150px_120px_auto] sm:grid-cols-[24px_1fr] sm:gap-y-1 gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate || r.missing_required ? "opacity-60" : ""}`}>
                     <input
                       type="checkbox"
                       checked={r.included}
@@ -419,14 +421,14 @@ function DisbursementImportDialog({
                         {formatDate(r.date)} · row {r.row_number}{r.is_duplicate && " · looks already imported"}
                       </p>
                     </div>
-                    <span className="text-xs text-foreground truncate">{r.fund_source || "—"}</span>
-                    <span className="text-xs text-foreground">{formatMoney(r.amount)}</span>
+                    <span className="text-xs text-foreground truncate sm:col-start-2">Fund source {r.fund_source || "—"}</span>
+                    <span className="text-xs text-foreground sm:col-start-2">{formatMoney(r.amount)}</span>
                     {r.missing_required ? (
-                      <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-destructive/10 text-destructive w-fit">
+                      <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-destructive/10 text-destructive w-fit sm:col-start-2">
                         Missing Amount
                       </span>
                     ) : (
-                      <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 w-fit">
+                      <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 w-fit sm:col-start-2">
                         Ready
                       </span>
                     )}
@@ -465,6 +467,8 @@ const DisbursementTrackerPage = () => {
   const [recomputing, setRecomputing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  // "Sync Sheets" opens the Sheet Setup dialog straight on its review step (same flow as Bulk Import).
+  const [sheetSyncAuto, setSheetSyncAuto] = useState(false);
   const [unmatchedAcctgOpen, setUnmatchedAcctgOpen] = useState(false);
   const [unmatchedAcctgCount, setUnmatchedAcctgCount] = useState<number | null>(null);
   const [unmatchedAcctgNetSum, setUnmatchedAcctgNetSum] = useState(0);
@@ -730,8 +734,8 @@ const DisbursementTrackerPage = () => {
         </select>
       </DateRangeFilterBar>
 
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -741,16 +745,16 @@ const DisbursementTrackerPage = () => {
             className="w-full pl-9 pr-4 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <div className="flex gap-2 ml-auto sm:ml-0">
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
           <Button variant="outline" className="text-foreground" onClick={handleRecomputeGross} disabled={recomputing || entries.length === 0} title="Re-run the RAOD Gross lookup on every existing row">
-            <RefreshCw className={`w-4 h-4 mr-2 ${recomputing ? "animate-spin" : ""}`} /> Recompute Gross
+            <RefreshCw className={`w-4 h-4 mr-2 slg:mr-0 ${recomputing ? "animate-spin" : ""}`} /> <span className="slg:hidden">Recompute Gross</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleSync} disabled={syncing} title="Sync from Google Sheets">
-            <Settings className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? 'Syncing…' : 'Sync Sheets'}
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(true); setSheetSetupOpen(true); }} title="Sync from Google Sheets — review the rows before saving">
+            <Settings className={`w-4 h-4 mr-2 slg:mr-0 ${syncing ? "animate-spin" : ""}`} />
+            <span className="slg:hidden">{syncing ? 'Syncing…' : 'Sync Sheets'}</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Manage Google Sheet sources">
-            <Link2 className="w-4 h-4 mr-2" /> Sheet Setup
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(false); setSheetSetupOpen(true); }} title="Manage Google Sheet sources">
+            <Link2 className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Sheet Setup</span>
           </Button>
           <Button
             variant="outline"
@@ -758,14 +762,14 @@ const DisbursementTrackerPage = () => {
             onClick={() => setUnmatchedAcctgOpen(true)}
             title="Acctg rows with a Net Amount but no matching DV in this tracker"
           >
-            <FileWarning className="w-4 h-4 mr-2" />
-            DVs Not Yet in Tracker{unmatchedAcctgCount ? ` (${unmatchedAcctgCount})` : ""}
+            <FileWarning className="w-4 h-4 mr-2 slg:mr-0" />
+            <span className="slg:hidden">DVs Not Yet in Tracker</span>{unmatchedAcctgCount ? <span className="slg:ml-1"> ({unmatchedAcctgCount})</span> : ""}
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-2" /> Bulk Import
+          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)} title="Bulk Import" aria-label="Bulk Import">
+            <Upload className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Bulk Import</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0}>
-            <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0} title="Delete All" aria-label="Delete All">
+            <AlertTriangle className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Delete All</span>
           </Button>
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add DV
@@ -777,18 +781,19 @@ const DisbursementTrackerPage = () => {
           line. This keeps the DV count/Amount grouped without dropping the
           Net breakdown recorded in the working sheet. */}
       <KpiStrip cards={[
-        { title: "Total DVs", value: String(groups.length), icon: Wallet },
-        { title: "Total DV Amount", value: formatMoney(groups.reduce((s, g) => s + g.totalAmount, 0)), icon: FileText },
+        { title: "Total DVs", subtitle: 'Sheet column: "DV NUMBER" (one per DV)', value: String(groups.length), icon: Wallet },
+        { title: "Total DV Amount", subtitle: 'Sheet column: "AMOUNT" (summed per DV)', value: formatMoney(groups.reduce((s, g) => s + g.totalAmount, 0)), icon: FileText },
 
         {
           title: "Total Net",
+          subtitle: 'Sheet columns: "NET" (DV sheet) / "NET AMOUNT" (Acctg sheet)',
           value: formatMoney(groups.reduce((s, g) => s + g.totalNet, 0) + unmatchedAcctgNetSum),
           caption: unmatchedAcctgNetSum > 0 ? `Incl. ${formatMoney(unmatchedAcctgNetSum)} not yet in tracker` : undefined,
           captionTone: "warning",
           icon: Scale,
           onClick: () => setNetBreakdownOpen(true),
         },
-        { title: "Paid", value: String(groups.filter((g) => g.isPaid).length), icon: AlertTriangle },
+        { title: "Paid", subtitle: 'Sheet column: "DATE PAID"', value: String(groups.filter((g) => g.isPaid).length), icon: AlertTriangle },
       ]} />
 
       <BulkActionBar count={selected.size} itemLabel="DV" onDelete={handleBulkDelete} onClear={clearSelection} />
@@ -798,7 +803,7 @@ const DisbursementTrackerPage = () => {
       ) : (
         <>
           <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr_1fr_90px] gap-3 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.2fr_1fr_auto]">
+            <div className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr_1fr_90px] gap-3 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.2fr_1fr_auto]">
               <SelectAllCheckbox checked={isAllSelected(pageEntryIds)} indeterminate={isSomeSelected(pageEntryIds)} onChange={() => toggleAll(pageEntryIds)} />
               <span />
               <SortFilterHeader label="DV No." sortKey="dv_number" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
@@ -825,7 +830,7 @@ const DisbursementTrackerPage = () => {
                   <div key={g.key}>
                     <div
                       onClick={() => toggleExpanded(g.key)}
-                      className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr_1fr_90px] gap-3 px-5 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.2fr_1fr_auto] cursor-pointer"
+                      className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr_1fr_90px] gap-3 px-5 sm:gap-2 sm:px-3 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.2fr_1fr_auto] cursor-pointer"
                     >
                       <SelectAllCheckbox
                         checked={isAllSelected(groupIds)}
@@ -837,7 +842,7 @@ const DisbursementTrackerPage = () => {
                         {expanded.has(g.key) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       </button>
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{g.dv_number || "(no DV No.)"}</p>
+                        <p className="text-sm font-medium text-foreground truncate sm:whitespace-normal sm:break-words">{g.dv_number || "(no DV No.)"}</p>
                         <p className="text-xs text-muted-foreground truncate">
                           {formatDate(g.date)} · {g.entries.length} ORS line{g.entries.length === 1 ? "" : "s"}
                         </p>
@@ -851,8 +856,43 @@ const DisbursementTrackerPage = () => {
                     </div>
 
                     {expanded.has(g.key) && (
-                      <div className="px-5 py-3 bg-muted/20 border-b border-border">
-                        <div className="overflow-x-auto">
+                      <div className="px-5 py-3 bg-muted/20 border-b border-border sm:px-3">
+                        {/* Phones: one card per entry instead of a 900px-wide table */}
+                        <div className="hidden sm:flex flex-col gap-2">
+                          {g.entries.map((d) => (
+                            <div key={d.id} onClick={() => setViewing(d)} className="flex gap-2 rounded-lg border border-border bg-card p-2.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="mt-1 shrink-0"
+                                checked={selected.has(d.id)}
+                                onChange={() => toggle(d.id)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-foreground break-words">ORS {d.ors_no || "—"}</p>
+                                    <p className="text-[11px] text-muted-foreground break-words">Routing slip {d.routing_slip_no || "—"}</p>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                    <button onClick={() => handleEdit(d)} className="p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" aria-label="Edit">
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button onClick={() => handleDelete(d)} className="p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" aria-label="Delete">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                                {d.particulars && <p className="mt-1 text-xs text-muted-foreground break-words">{d.particulars}</p>}
+                                <div className="mt-1.5 flex justify-between gap-2 text-xs">
+                                  <span className="text-foreground">Amount: <b>{formatMoney(d.amount)}</b></span>
+                                  <span className="text-foreground">Gross: <b>{formatMoney(d.gross)}</b></span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="overflow-x-auto sm:hidden">
                           <div className="min-w-[900px] border border-border rounded-lg overflow-hidden">
                             <div className="grid grid-cols-[24px_100px_170px_1.5fr_120px_120px_auto] gap-2 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                               <span />
@@ -881,10 +921,10 @@ const DisbursementTrackerPage = () => {
                                 <span className="text-foreground">{formatMoney(d.amount)}</span>
                                 <span className="text-foreground">{formatMoney(d.gross)}</span>
                                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => handleEdit(d)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                                  <button onClick={() => handleEdit(d)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                                     <Pencil className="w-3.5 h-3.5" />
                                   </button>
-                                  <button onClick={() => handleDelete(d)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                                  <button onClick={() => handleDelete(d)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
@@ -921,7 +961,7 @@ const DisbursementTrackerPage = () => {
       <DisbursementImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={load} />
       <DisbursementDetailDialog disbursement={viewing} open={!!viewing} onOpenChange={(open) => !open && setViewing(null)} />
       <SheetSyncManagerDialog
-        open={sheetSetupOpen}
+        open={sheetSetupOpen} autoPreview={sheetSyncAuto}
         onOpenChange={setSheetSetupOpen}
         table="disbursement_tracker"
         label="Disbursement Tracker"

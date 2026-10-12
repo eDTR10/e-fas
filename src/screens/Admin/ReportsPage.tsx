@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
   Search, Plus, Trash2, Pencil, Archive, ArchiveRestore, X, Download, ClipboardPaste, FileSpreadsheet,
@@ -24,6 +25,7 @@ import { rciApi, RCI_MDS_TYPE_OPTIONS } from "../../lib/rciApi";
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
@@ -765,13 +767,13 @@ function ReportTab({ config }: { config: ReportConfig }) {
       </div>
 
       <KpiStrip cards={[
-        { title: "Total Entries", value: String(filtered.length), icon: Search },
-        { title: "Total Amount", value: `₱${formatMoney(total)}`, icon: Download },
-        { title: "Periods", value: String(periods), icon: Archive },
+        { title: "Total Entries", subtitle: "Saved report entries (row count)", value: String(filtered.length), icon: Search },
+        { title: "Total Amount", subtitle: "Sum of the entries' amounts", value: `₱${formatMoney(total)}`, icon: Download },
+        { title: "Periods", subtitle: "Distinct report periods", value: String(periods), icon: Archive },
       ]} />
 
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -797,15 +799,15 @@ function ReportTab({ config }: { config: ReportConfig }) {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={() => setGenerateOpen(true)} disabled={filtered.length === 0}>
-            <FileSpreadsheet className="w-4 h-4 mr-2" /> Generate Report
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => setGenerateOpen(true)} disabled={filtered.length === 0} title="Generate Report" aria-label="Generate Report">
+            <FileSpreadsheet className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Generate Report</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleExportCsv} disabled={filtered.length === 0}>
-            <Download className="w-4 h-4 mr-2" /> Export CSV
+          <Button variant="outline" className="text-foreground" onClick={handleExportCsv} disabled={filtered.length === 0} title="Export CSV" aria-label="Export CSV">
+            <Download className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Export CSV</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setPasteOpen(true)}>
-            <ClipboardPaste className="w-4 h-4 mr-2" /> Paste Import
+          <Button variant="outline" className="text-foreground" onClick={() => setPasteOpen(true)} title="Paste Import" aria-label="Paste Import">
+            <ClipboardPaste className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Paste Import</span>
           </Button>
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add Entry
@@ -860,13 +862,13 @@ function ReportTab({ config }: { config: ReportConfig }) {
                 <span className="text-foreground whitespace-nowrap">₱{formatMoney(row.amount)}</span>
                 <span className="text-xs text-muted-foreground truncate">{row.period_covered}</span>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => handleEdit(row)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                  <button onClick={() => handleEdit(row)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => handleArchiveToggle(row)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={row.is_archived ? "Unarchive" : "Archive"}>
+                  <button onClick={() => handleArchiveToggle(row)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={row.is_archived ? "Unarchive" : "Archive"}>
                     {row.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                   </button>
-                  <button onClick={() => handleDelete(row)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                  <button onClick={() => handleDelete(row)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>

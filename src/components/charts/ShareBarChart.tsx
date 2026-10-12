@@ -37,7 +37,7 @@ export default function ShareBarChart({ title, subtitle, series, data, formatVal
     return (
       <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-semibold text-foreground mb-1">{title}</h3>
-        {subtitle && <p className="text-xs text-muted-foreground mb-4">{subtitle}</p>}
+        {subtitle && <p className="text-xs italic text-muted-foreground mb-4">{subtitle}</p>}
         <p className="text-sm text-muted-foreground py-10 text-center">No data for the selected filters.</p>
       </div>
     );
@@ -48,7 +48,7 @@ export default function ShareBarChart({ title, subtitle, series, data, formatVal
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          {subtitle && <p className="text-xs italic text-muted-foreground">{subtitle}</p>}
         </div>
         {totalLabel && totalValue !== undefined && (
           <div className="text-right shrink-0">

@@ -1,3 +1,4 @@
+import { labelPapOptions } from "../../lib/papLabel";
 import { useEffect, useMemo, useState } from "react";
 import { FileText, Landmark, PiggyBank, Link2, Link2Off, Search, Scale, Banknote, Wallet } from "lucide-react";
 import AdminLayout from "./AdminLayout";
@@ -232,25 +233,27 @@ const Dashboard = () => {
 
   const stats: {
     title: string;
+    subtitle: string;
     value: number;
     count: number | null;
     icon: JSX.Element;
     caption?: string;
     captionTone?: "warning";
   }[] = [
-    { title: "Total SARO", value: totalSaroAmount, count: filteredSaro.length, icon: <FileText className="w-5 h-5" /> },
-    { title: "Total Received NTCA (Accounting)", value: totalNtcaAmount, count: filteredNtca.length, icon: <Landmark className="w-5 h-5" /> },
+    { title: "Total SARO", subtitle: 'Received SARO sheet: "AMOUNT"', value: totalSaroAmount, count: filteredSaro.length, icon: <FileText className="w-5 h-5" /> },
+    { title: "Total Received NTCA (Accounting)", subtitle: 'Received NTCA sheet: "NTCA AMOUNT"', value: totalNtcaAmount, count: filteredNtca.length, icon: <Landmark className="w-5 h-5" /> },
     {
       title: "NTCA Disbursed (Cashiering)",
+      subtitle: 'Custom Disbursement sheet: "ADA" + "AMOUNT"',
       value: totalCustomDisbursedAmount,
       count: filteredCustomDisbursements.length,
       icon: <Wallet className="w-5 h-5" />,
       caption: advanceCustomDisbursedAmount > 0 ? `incl. ${formatCompactMoney(advanceCustomDisbursedAmount)} advance (no NTCA yet)` : undefined,
       captionTone: "warning",
     },
-    { title: "Total Disbursed (Gross)", value: totalGrossDisbursed, count: filteredRaod.length, icon: <Scale className="w-5 h-5" /> },
-    { title: "Total Disbursed (Net)", value: totalNetDisbursed, count: filteredDisbursementTracker.length, icon: <Banknote className="w-5 h-5" /> },
-    { title: "Available Balance", value: availableBalance, count: null, icon: <PiggyBank className="w-5 h-5" /> },
+    { title: "Total Disbursed (Gross)", subtitle: 'RAOD sheet: "Cash" + "Non TRA"', value: totalGrossDisbursed, count: filteredRaod.length, icon: <Scale className="w-5 h-5" /> },
+    { title: "Total Disbursed (Net)", subtitle: 'Disbursement Tracker sheet: "NET"', value: totalNetDisbursed, count: filteredDisbursementTracker.length, icon: <Banknote className="w-5 h-5" /> },
+    { title: "Available Balance", subtitle: 'Received NTCA minus Cashiering and Net disbursed (computed)', value: availableBalance, count: null, icon: <PiggyBank className="w-5 h-5" /> },
   ];
 
   const chartMonths = useMemo(() => {
@@ -396,7 +399,7 @@ const Dashboard = () => {
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
         >
           <option value="">All PAP / Projects</option>
-          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+          {labelPapOptions(papOptions).map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
         </select>
       </DateRangeFilterBar>
 
@@ -404,11 +407,11 @@ const Dashboard = () => {
       {loading ? (
         <StatCardsSkeleton />
       ) : (
-        <div className="grid grid-cols-3 gap-4 mb-6 lg:grid-cols-2 sm:grid-cols-1">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))] gap-x-4 mb-2">
           {stats.map((stat) => (
             <div
               key={stat.title}
-              className="bg-card border border-border rounded-xl p-5 flex flex-col gap-3 hover:border-primary/40 transition-colors cursor-pointer hover:bg-accent/30"
+              className="bg-card border border-border rounded-xl p-5 mb-4 grid [grid-row:span_3] [grid-template-rows:subgrid] sm:p-4 hover:border-primary/40 transition-colors cursor-pointer hover:bg-accent/30"
               onClick={() => {
                 switch (stat.title) {
                   case "Total SARO":
@@ -433,15 +436,18 @@ const Dashboard = () => {
               }}
               style={{ userSelect: "none" }}
             >
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.title}</p>
+              <div className="flex items-start justify-between gap-2 pb-3 sm:pb-1.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-foreground uppercase tracking-wide">{stat.title}</p>
+                  <p className="mt-0.5 text-[10px] italic leading-tight text-muted-foreground/70">{stat.subtitle}</p>
+                </div>
                 <span className="p-2 rounded-lg bg-primary/10 text-primary">{stat.icon}</span>
               </div>
-              <p className="text-2xl font-bold text-foreground">{formatCompactMoney(stat.value)}</p>
+              <p className="text-2xl font-bold text-foreground sm:text-xl">{formatCompactMoney(stat.value)}</p>
               {stat.caption ? (
-                <p className={`text-xs font-medium ${stat.captionTone === "warning" ? "text-destructive" : "text-muted-foreground"}`}>{stat.caption}</p>
+                <p className={`pt-3 text-xs font-medium sm:pt-1.5 ${stat.captionTone === "warning" ? "text-destructive" : "text-foreground"}`}>{stat.caption}</p>
               ) : stat.count !== null && (
-                <p className="text-xs font-medium text-muted-foreground">{stat.count} record{stat.count === 1 ? "" : "s"}</p>
+                <p className="pt-3 text-xs font-medium text-foreground sm:pt-1.5">{stat.count} record{stat.count === 1 ? "" : "s"}</p>
               )}
             </div>
           ))}

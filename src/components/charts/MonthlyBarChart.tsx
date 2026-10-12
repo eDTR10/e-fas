@@ -50,7 +50,7 @@ export default function MonthlyBarChart({ title, subtitle, months, series, data,
     return (
       <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-semibold text-foreground mb-1">{title}</h3>
-        {subtitle && <p className="text-xs text-muted-foreground mb-4">{subtitle}</p>}
+        {subtitle && <p className="text-xs italic text-muted-foreground mb-4">{subtitle}</p>}
         <p className="text-sm text-muted-foreground py-10 text-center">No data for the selected filters.</p>
       </div>
     );
@@ -61,7 +61,7 @@ export default function MonthlyBarChart({ title, subtitle, months, series, data,
       <div className="flex items-start justify-between mb-1 gap-3 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+          {subtitle && <p className="text-xs italic text-muted-foreground">{subtitle}</p>}
         </div>
         {/* Legend — line-keys, never color-only identity */}
         <div className="flex items-center gap-4">

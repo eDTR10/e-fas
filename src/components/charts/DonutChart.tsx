@@ -38,7 +38,7 @@ export default function DonutChart({ title, subtitle, series, data, formatValue 
     return (
       <div className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-semibold text-foreground mb-1">{title}</h3>
-        {subtitle && <p className="text-xs text-muted-foreground mb-4">{subtitle}</p>}
+        {subtitle && <p className="text-xs italic text-muted-foreground mb-4">{subtitle}</p>}
         <p className="text-sm text-muted-foreground py-10 text-center">No data for the selected filters.</p>
       </div>
     );
@@ -55,7 +55,7 @@ export default function DonutChart({ title, subtitle, series, data, formatValue 
     <div className="bg-card border border-border rounded-xl p-5">
       <div className="mb-1">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+        {subtitle && <p className="text-xs italic text-muted-foreground">{subtitle}</p>}
       </div>
 
       <div className="relative" style={{ height: 240 }}>

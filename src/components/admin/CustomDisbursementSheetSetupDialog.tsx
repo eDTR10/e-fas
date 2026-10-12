@@ -85,6 +85,10 @@ export function CustomDisbursementSheetSetupDialog({
                   await loadCluster(o.value);
                 }}
                 onRequestRemove={(source) => handleRemove(o.value, source)}
+                onUpdate={async (source, changes) => {
+                  await sheetSyncApi.update(source.id, changes);
+                  await loadCluster(o.value);
+                }}
               />
             </div>
           ))}

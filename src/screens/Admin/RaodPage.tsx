@@ -1,3 +1,5 @@
+import { labelPapOptions } from "../../lib/papLabel";
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
   Search, Plus, Upload, Trash2, Pencil, Archive, ArchiveRestore, Link2, Link2Off,
@@ -109,6 +111,7 @@ const formatDate = (value: string | null | undefined): string => {
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
@@ -432,7 +435,7 @@ function RaodImportDialog({
                 </div>
               )}
               <div className="border border-border rounded-lg overflow-hidden max-h-[55vh] overflow-y-auto">
-                <div className="grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
+                <div className="grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0 sm:hidden">
                   <span />
                   <span>SARO No. / Object</span>
                   <span>PAP Code</span>
@@ -440,7 +443,7 @@ function RaodImportDialog({
                   <span>SARO Match</span>
                 </div>
                 {rows.map((r, i) => (
-                  <div key={i} className={`grid grid-cols-[24px_1fr_150px_120px_auto] gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate ? "opacity-60" : ""}`}>
+                  <div key={i} className={`grid grid-cols-[24px_1fr_150px_120px_auto] sm:grid-cols-[24px_1fr] sm:gap-y-1 gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate ? "opacity-60" : ""}`}>
                     <input
                       type="checkbox"
                       checked={r.included}
@@ -452,14 +455,14 @@ function RaodImportDialog({
                         {formatDate(r.date_of_saro)} · row {r.row_number}{r.is_duplicate && " · looks already imported"}
                       </p>
                     </div>
-                    <span className="text-xs text-foreground truncate">{r.pap_code || "—"}</span>
-                    <span className="text-xs text-foreground">{formatMoney(r.amount_of_allotment)}</span>
+                    <span className="text-xs text-foreground truncate sm:col-start-2">PAP {r.pap_code || "—"}</span>
+                    <span className="text-xs text-foreground sm:col-start-2">{formatMoney(r.amount_of_allotment)}</span>
                     {r.saro_match ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 w-fit">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 w-fit sm:col-start-2">
                         <Link2 className="w-3 h-3" /> #{r.saro_match.id} {r.saro_match.pap_name || r.saro_match.saro_no}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground w-fit">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground w-fit sm:col-start-2">
                         <Link2Off className="w-3 h-3" /> No SARO — informational only
                       </span>
                     )}
@@ -681,6 +684,8 @@ const RaodPage = () => {
 
   const [syncing, setSyncing] = useState(false);
   const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  // "Sync Sheets" opens the Sheet Setup dialog straight on its review step (same flow as Bulk Import).
+  const [sheetSyncAuto, setSheetSyncAuto] = useState(false);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -739,7 +744,7 @@ const RaodPage = () => {
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
         >
           <option value="">All PAP / Projects</option>
-          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+          {labelPapOptions(papOptions).map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
         </select>
         <select
           value={fundTypeFilter}
@@ -751,8 +756,8 @@ const RaodPage = () => {
         </select>
       </DateRangeFilterBar>
 
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -766,19 +771,19 @@ const RaodPage = () => {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-2" /> Bulk Import
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)} title="Bulk Import" aria-label="Bulk Import">
+            <Upload className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Bulk Import</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleSync} disabled={syncing} title="Sync from Google Sheets">
-            <Settings className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Syncing…' : 'Sync Sheets'}
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(true); setSheetSetupOpen(true); }} title="Sync from Google Sheets — review the rows before saving">
+            <Settings className={`w-4 h-4 mr-2 slg:mr-0 ${syncing ? 'animate-spin' : ''}`} />
+            <span className="slg:hidden">{syncing ? 'Syncing…' : 'Sync Sheets'}</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Manage Google Sheet sources">
-            <Link2 className="w-4 h-4 mr-2" /> Sheet Setup
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(false); setSheetSetupOpen(true); }} title="Manage Google Sheet sources">
+            <Link2 className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Sheet Setup</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0}>
-            <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0} title="Delete All" aria-label="Delete All">
+            <AlertTriangle className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Delete All</span>
           </Button>
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add Entry
@@ -788,10 +793,10 @@ const RaodPage = () => {
 
       {/* KPI Strip */}
       <KpiStrip cards={[
-        { title: "Total Allotment", value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount_of_allotment || 0), 0)), icon: FileText },
-        { title: "Total Obligated", value: formatMoney(filtered.reduce((s, x) => s + Number(x.obligated_amount || 0), 0)), icon: Wallet },
-        { title: "Total Disbursed", value: formatMoney(filtered.reduce((s, x) => s + Number(x.cash || 0) + Number(x.non_tra || 0), 0)), icon: Scale },
-        { title: "Unobligated", value: formatMoney(filtered.reduce((s, x) => s + Number(x.balance || 0), 0)), icon: FileText },
+        { title: "Total Allotment", value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount_of_allotment || 0), 0)), subtitle: 'Sheet column: "Amount of Allotment"', icon: FileText },
+        { title: "Total Obligated", subtitle: 'Sheet column: "Obligated Amount"', value: formatMoney(filtered.reduce((s, x) => s + Number(x.obligated_amount || 0), 0)), icon: Wallet },
+        { title: "Total Disbursed", subtitle: 'Sheet columns: "Cash" + "Non TRA"', value: formatMoney(filtered.reduce((s, x) => s + Number(x.cash || 0) + Number(x.non_tra || 0), 0)), icon: Scale },
+        { title: "Unobligated", subtitle: 'Sheet column: "Balance"', value: formatMoney(filtered.reduce((s, x) => s + Number(x.balance || 0), 0)), icon: FileText },
       ]} />
 
       <BulkActionBar count={selected.size} itemLabel="RAOD record" onDelete={handleBulkDelete} onClear={clearSelection} />
@@ -800,7 +805,7 @@ const RaodPage = () => {
         <TableSkeleton rows={6} />
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="grid grid-cols-[24px_24px_1.4fr_1fr_1fr_1fr] gap-4 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.4fr_auto]">
+          <div className="grid grid-cols-[24px_24px_1.4fr_1fr_1fr_1fr] gap-4 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.4fr_auto]">
             <SelectAllCheckbox checked={isAllSelected(pageEntryIds)} indeterminate={isSomeSelected(pageEntryIds)} onChange={() => toggleAll(pageEntryIds)} />
             <span />
             <SortFilterHeader label="PAP / Project" sortKey="pap" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
@@ -827,7 +832,7 @@ const RaodPage = () => {
                 <div key={papKey}>
                   <div
                     onClick={() => toggleExpanded(papKey)}
-                    className="grid grid-cols-[24px_24px_1.4fr_1fr_1fr_1fr] gap-4 px-5 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.4fr_auto] cursor-pointer"
+                    className="grid grid-cols-[24px_24px_1.4fr_1fr_1fr_1fr] gap-4 px-5 sm:gap-2 sm:px-3 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.4fr_auto] cursor-pointer"
                   >
                     <SelectAllCheckbox
                       checked={isAllSelected(papIds)}
@@ -839,7 +844,7 @@ const RaodPage = () => {
                       {expanded.has(papKey) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </button>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
+                      <p className="text-sm font-medium text-foreground truncate sm:whitespace-normal sm:break-words">
                         {p.pap || "(no PAP)"}
                         {p.allArchived && <Badge variant="destructive" className="ml-2">archived</Badge>}
                       </p>
@@ -851,14 +856,14 @@ const RaodPage = () => {
                   </div>
 
                   {expanded.has(papKey) && (
-                    <div className="pl-6 pr-0 bg-muted/10 border-b border-border">
+                    <div className="pl-6 pr-0 bg-muted/10 border-b border-border sm:pl-1">
                       {p.saroGroups.map((g) => {
                         const groupIds = g.entries.map((e) => e.id);
                         return (
                           <div key={g.key} className="border-b border-border last:border-0">
                             <div
                               onClick={() => setViewingGroup(g.key)}
-                              className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr] gap-4 pl-3 pr-5 py-3 items-center hover:bg-accent/40 transition-colors cursor-pointer"
+                              className="grid grid-cols-[24px_24px_1.2fr_1fr_1fr] gap-4 pl-3 pr-5 py-3 items-center hover:bg-accent/40 transition-colors cursor-pointer sm:grid-cols-[20px_20px_1fr_auto] sm:gap-2 sm:pl-2 sm:pr-3"
                             >
                               <SelectAllCheckbox
                                 checked={isAllSelected(groupIds)}
@@ -870,7 +875,7 @@ const RaodPage = () => {
                                 {expanded.has(g.key) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                               </button>
                               <div className="min-w-0">
-                                <p className="text-sm font-medium text-foreground truncate">
+                                <p className="text-sm font-medium text-foreground truncate sm:whitespace-normal sm:break-words">
                                   {g.saro_no || "(no SARO No.)"}
                                   {g.allArchived && <Badge variant="destructive" className="ml-2">archived</Badge>}
                                 </p>
@@ -881,8 +886,82 @@ const RaodPage = () => {
                             </div>
 
                             {expanded.has(g.key) && (
-                              <div className="px-5 py-3 bg-muted/20 border-t border-border">
-                                <div className="overflow-x-auto">
+                              <div className="px-5 py-3 bg-muted/20 border-t border-border sm:px-2">
+                                {/* Phones: object codes and their entries as stacked cards instead of 860px-wide tables */}
+                                <div className="hidden sm:flex flex-col gap-2">
+                                  {groupEntriesByObjectCode(g.entries).map((code) => {
+                                    const codeKey = `${g.key}::obj::${code.object_code}`;
+                                    const codeIds = code.entries.map((e) => e.id);
+                                    return (
+                                      <div key={codeKey} className="rounded-lg border border-border bg-card">
+                                        <div className="flex items-start gap-2 p-2.5" onClick={() => toggleExpanded(codeKey)}>
+                                          <span onClick={(e) => e.stopPropagation()} className="mt-0.5 shrink-0">
+                                            <SelectAllCheckbox
+                                              checked={isAllSelected(codeIds)}
+                                              indeterminate={isSomeSelected(codeIds)}
+                                              onChange={() => toggleAll(codeIds)}
+                                              onClick={(e) => e.stopPropagation()}
+                                            />
+                                          </span>
+                                          <span className="mt-0.5 text-muted-foreground shrink-0">
+                                            {expanded.has(codeKey) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                          </span>
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                              <CategoryChip label={code.object_code} />
+                                              {code.entries.length > 1 && <Badge variant="secondary">{code.entries.length} entries</Badge>}
+                                            </div>
+                                            <p className="mt-1 text-sm text-foreground break-words">{code.object_description || "—"}</p>
+                                            <div className="mt-1.5 grid grid-cols-3 gap-2 text-xs">
+                                              <div><p className="text-[10px] uppercase text-muted-foreground">Allotment</p><p className="font-semibold text-foreground break-words">{formatMoney(code.amount_of_allotment)}</p></div>
+                                              <div><p className="text-[10px] uppercase text-muted-foreground">Obligated</p><p className="font-semibold text-foreground break-words">{formatMoney(code.obligated_amount)}</p></div>
+                                              <div><p className="text-[10px] uppercase text-muted-foreground">Balance</p><p className="font-semibold text-foreground break-words">{formatMoney(code.balance)}</p></div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        {expanded.has(codeKey) && (
+                                          <div className="flex flex-col gap-2 border-t border-border p-2">
+                                            {code.entries.map((s) => (
+                                              <div key={s.id} onClick={() => setViewing(s)} className="flex gap-2 rounded-md border border-border bg-background p-2 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  className="mt-1 shrink-0"
+                                                  checked={selected.has(s.id)}
+                                                  onChange={() => toggle(s.id)}
+                                                  onClick={(e) => e.stopPropagation()}
+                                                />
+                                                <div className="min-w-0 flex-1">
+                                                  <div className="flex items-start justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                      <p className="text-xs text-foreground break-words">{s.object_description || "—"}</p>
+                                                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                                                        <CategoryChip label={s.fund_type_description} />
+                                                        {s.is_archived && <Badge variant="destructive">archived</Badge>}
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                                      <button onClick={() => handleEdit(s)} className="p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" aria-label="Edit"><Pencil className="w-3.5 h-3.5" /></button>
+                                                      <button onClick={() => handleArchiveToggle(s)} className="p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" aria-label={s.is_archived ? "Unarchive" : "Archive"}>
+                                                        {s.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                                                      </button>
+                                                      <button onClick={() => handleDelete(s)} className="p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" aria-label="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                    </div>
+                                                  </div>
+                                                  <div className="mt-1.5 grid grid-cols-3 gap-2 text-xs">
+                                                    <div><p className="text-[10px] uppercase text-muted-foreground">Allotment</p><p className="font-medium text-foreground break-words">{formatMoney(s.amount_of_allotment)}</p></div>
+                                                    <div><p className="text-[10px] uppercase text-muted-foreground">Obligated</p><p className="font-medium text-foreground break-words">{formatMoney(s.obligated_amount)}</p></div>
+                                                    <div><p className="text-[10px] uppercase text-muted-foreground">Balance</p><p className="font-medium text-foreground break-words">{formatMoney(s.balance)}</p></div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className="overflow-x-auto sm:hidden">
                                   <div className="min-w-[860px] border border-border rounded-lg overflow-hidden">
                                     <div className="grid grid-cols-[24px_24px_100px_1.5fr_120px_120px_120px] gap-2 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                                       <span />
@@ -954,13 +1033,13 @@ const RaodPage = () => {
                                                     <span className="text-foreground">{formatMoney(s.obligated_amount)}</span>
                                                     <span className="text-foreground">{formatMoney(s.balance)}</span>
                                                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                                      <button onClick={() => handleEdit(s)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                                                      <button onClick={() => handleEdit(s)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                                                         <Pencil className="w-3.5 h-3.5" />
                                                       </button>
-                                                      <button onClick={() => handleArchiveToggle(s)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={s.is_archived ? "Unarchive" : "Archive"}>
+                                                      <button onClick={() => handleArchiveToggle(s)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={s.is_archived ? "Unarchive" : "Archive"}>
                                                         {s.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                                                       </button>
-                                                      <button onClick={() => handleDelete(s)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                                                      <button onClick={() => handleDelete(s)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                                                         <Trash2 className="w-3.5 h-3.5" />
                                                       </button>
                                                     </div>
@@ -1010,7 +1089,7 @@ const RaodPage = () => {
         objectCodeList={objectCodeList}
       />
       <RaodImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={load} />
-      <SheetSyncManagerDialog open={sheetSetupOpen} onOpenChange={setSheetSetupOpen} table="raod" label="RAOD" onSynced={load} />
+      <SheetSyncManagerDialog open={sheetSetupOpen} autoPreview={sheetSyncAuto} onOpenChange={setSheetSetupOpen} table="raod" label="RAOD" onSynced={load} />
       <RaodDetailDialog saro={viewing} open={!!viewing} onOpenChange={(open) => !open && setViewing(null)} />
       <RaodGroupDetailDialog
         group={groups.find((g) => g.key === viewingGroup) || null}

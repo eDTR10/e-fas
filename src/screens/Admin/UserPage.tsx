@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Pencil, Trash2, Users, ShieldCheck, UserX, Building2 } from "lucide-react";
 import Swal from "sweetalert2";
@@ -23,6 +24,7 @@ import { SortFilterHeader } from "../../components/ui/sortable-header";
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
@@ -331,8 +333,8 @@ const UserPage = () => {
 
   return (
     <AdminLayout title="User Management" subtitle="Manage system users, roles, and office assignments">
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -350,7 +352,7 @@ const UserPage = () => {
           <option value="">All Roles</option>
           {USER_ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <div className="flex gap-2 ml-auto sm:ml-0">
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add User
           </Button>
@@ -358,10 +360,10 @@ const UserPage = () => {
       </div>
 
       <KpiStrip cards={[
-        { title: "Total Users", value: String(filtered.length), icon: Users },
-        { title: "Active", value: String(filtered.filter((u) => u.is_active).length), icon: ShieldCheck },
-        { title: "Inactive", value: String(filtered.filter((u) => !u.is_active).length), icon: UserX },
-        { title: "Admins", value: String(filtered.filter((u) => u.role === "admin").length), icon: Building2 },
+        { title: "Total Users", subtitle: "User accounts (not from a sheet)", value: String(filtered.length), icon: Users },
+        { title: "Active", subtitle: "Account status = active", value: String(filtered.filter((u) => u.is_active).length), icon: ShieldCheck },
+        { title: "Inactive", subtitle: "Account status = inactive", value: String(filtered.filter((u) => !u.is_active).length), icon: UserX },
+        { title: "Admins", subtitle: "Role = admin", value: String(filtered.filter((u) => u.role === "admin").length), icon: Building2 },
       ]} />
 
       <BulkActionBar count={selected.size} itemLabel="user" onDelete={handleBulkDelete} onClear={clearSelection} />
@@ -371,7 +373,7 @@ const UserPage = () => {
       ) : (
         <div>
           <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[24px_2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_2fr_1fr_auto]">
+            <div className="grid grid-cols-[24px_2fr_1fr_1fr_1fr_auto] gap-4 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_2fr_1fr_auto]">
               <SelectAllCheckbox checked={isAllSelected(pageIds)} indeterminate={isSomeSelected(pageIds)} onChange={() => toggleAll(pageIds)} />
               <SortFilterHeader label="User" sortKey="name" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
                 filterValue={columnFilters.name || ""} onFilterChange={(v) => setColumnFilter("name", v)} filterPlaceholder="Filter…" />
@@ -395,7 +397,7 @@ const UserPage = () => {
                 <div
                   key={u.id}
                   onClick={() => handleEdit(u)}
-                  className="grid grid-cols-[24px_2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3.5 border-b border-border last:border-0 items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_2fr_1fr_auto] cursor-pointer"
+                  className="grid grid-cols-[24px_2fr_1fr_1fr_1fr_auto] gap-4 px-5 sm:gap-2 sm:px-3 py-3.5 border-b border-border last:border-0 items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_2fr_1fr_auto] cursor-pointer"
                 >
                   <input
                     type="checkbox"
@@ -408,7 +410,7 @@ const UserPage = () => {
                       {(u.first_name.slice(0, 1) + u.last_name.slice(0, 1)) || u.email.slice(0, 2)}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
+                      <p className="text-sm font-medium text-foreground truncate sm:whitespace-normal sm:break-words">
                         {u.first_name} {u.last_name}
                         {currentUser && u.id === currentUser.id && <Badge variant="secondary" className="ml-2">you</Badge>}
                       </p>
@@ -421,10 +423,10 @@ const UserPage = () => {
                     <Badge variant={u.is_active ? "success" : "secondary"}>{u.is_active ? "Active" : "Inactive"}</Badge>
                   </div>
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => handleEdit(u)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                    <button onClick={() => handleEdit(u)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    {/* <button onClick={() => handleDelete(u)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                    {/* <button onClick={() => handleDelete(u)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button> */}
                   </div>

@@ -1,3 +1,4 @@
+import axios from "axios";
 import api from "../screens/Auth/authService";
 
 const BASE = "/api/v1/saro/sheet-sync-sources";
@@ -68,11 +69,15 @@ export interface SheetSyncSource {
   label: string;
   url: string;
   order: number;
+  // Only used for Received SARO sheets — stamped onto every SARO synced
+  // from this sheet so the same Allotment No. in two years stays separate.
+  year: number | null;
   last_synced_at: string | null;
   created_at: string;
 }
 
-export type SheetSyncSourcePayload = Omit<SheetSyncSource, "id" | "table_display" | "last_synced_at" | "created_at">;
+export type SheetSyncSourcePayload =
+  Omit<SheetSyncSource, "id" | "table_display" | "last_synced_at" | "created_at" | "year"> & { year?: number | null };
 
 export interface SheetSyncSourceResult {
   id: number;
@@ -97,6 +102,19 @@ export interface SheetSyncResult {
   };
 }
 
+// What a sync WOULD do, row by row — nothing is written until the user confirms.
+export type SyncRowStatus = "new" | "update" | "unchanged";
+
+export interface SheetSyncPreview {
+  table: SyncTable;
+  dry_run: true;
+  sources: SheetSyncSourceResult[];
+  warnings: string[];
+  // Flat rows for most tables; SARO groups (header + line items) for received_saro.
+  // Each carries `sync_status`, and `changed_fields` when it is an update.
+  rows: (Record<string, unknown> & { sync_status?: SyncRowStatus; changed_fields?: string[] })[];
+}
+
 export const sheetSyncApi = {
   list: async (table?: SyncTable): Promise<SheetSyncSource[]> => {
     const { data } = await api.get<SheetSyncSource[]>(`${BASE}/`, { params: { table } });
@@ -108,13 +126,24 @@ export const sheetSyncApi = {
     return data;
   },
 
-  update: async (id: number, payload: SheetSyncSourcePayload): Promise<SheetSyncSource> => {
+  update: async (id: number, payload: Partial<SheetSyncSourcePayload>): Promise<SheetSyncSource> => {
     const { data } = await api.patch<SheetSyncSource>(`${BASE}/${id}/`, payload);
     return data;
   },
 
   remove: async (id: number): Promise<void> => {
     await api.delete(`${BASE}/${id}/`);
+  },
+
+  // Fetch + parse every configured sheet exactly like a sync, but write nothing.
+  preview: async (table: SyncTable): Promise<SheetSyncPreview> => {
+    const { data } = await api.post<SheetSyncPreview>(`${BASE}/sync/`, { table, dry_run: "true" });
+    return data;
+  },
+
+  // Stamp "last synced" on the table's sources after a confirmed preview.
+  markSynced: async (table: SyncTable): Promise<void> => {
+    await api.post(`${BASE}/mark_synced/`, { table });
   },
 
   // Fetches every configured sheet for this table, merges their rows into
@@ -126,7 +155,9 @@ export const sheetSyncApi = {
       return data;
     } catch (error) {
       const hasResponse = Boolean((error as { response?: unknown })?.response);
-      if (hasResponse) throw error;
+      // A user-cancelled sync must stay cancelled — it also has no response,
+      // so without this it would be mistaken for a dropped connection and resent.
+      if (hasResponse || axios.isCancel(error)) throw error;
 
       // Sync imports are idempotent, so one retry is safe if the connection
       // was dropped before the client received a response.

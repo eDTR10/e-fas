@@ -1,3 +1,5 @@
+import { labelPapOptions } from "../../lib/papLabel";
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import {
   ChevronDown, ChevronRight, Search, Plus,
   Upload, Trash2, Pencil, Archive, ArchiveRestore,
@@ -12,7 +14,9 @@ import { Input } from "../../components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "../../components/ui/dialog";
-import { sheetSyncApi } from "../../lib/sheetSyncApi";
+import { sheetSyncApi, SheetSyncSource } from "../../lib/sheetSyncApi";
+import { SheetTotalsCard } from "../../components/ui/sheet-totals-card";
+import { TopListCard } from "../../components/ui/top-list-card";
 import { SheetSyncManagerDialog } from "../../components/admin/SheetSyncManagerDialog";
 import {
   receivedSaroApi, ReceivedSARO, ReceivedSAROLineItem, BulkImportGroupResult,
@@ -22,6 +26,7 @@ import {
   PAP, ClassType, FundSource, ObjectCode,
 } from "../../lib/referenceDataApi";
 import { QuickFillSelect } from "../../components/ui/quick-fill-select";
+import { ComboInput } from "../../components/ui/combo-input";
 import { Pagination } from "../../components/ui/pagination";
 import { ReceivedSaroDetailDialog } from "../../components/admin/detail/ReceivedSaroDetailDialog";
 import { BulkActionBar } from "../../components/ui/bulk-action-bar";
@@ -121,7 +126,11 @@ const toApiPayload = (header: HeaderForm, lines: LineItemForm[]) => ({
   date_of_saro: header.date_of_saro || null,
   classification: header.classification.trim(),
   validity_notes: header.validity_notes.trim(),
-  amount: header.amount || "0",
+  // A SARO's amount is the sum of its object-code lines (same as the sheet sync).
+  amount: (() => {
+    const sum = lines.reduce((t, li) => t + (Number(li.amount) || 0), 0);
+    return sum > 0 ? sum.toFixed(2) : header.amount || "0";
+  })(),
   pap_code: header.pap_code.trim(),
   pap_name: header.pap_name.trim(),
   class_type_label: header.class_type_label.trim(),
@@ -139,6 +148,81 @@ const toApiPayload = (header: HeaderForm, lines: LineItemForm[]) => ({
       balance: li.balance || null,
     })),
 });
+
+// ── dropdown vocabularies, taken from what the real sheets actually contain ──
+// Class and Class Type are 1:1 in the data (MOOE → "2 MOOE", PS → "1 PS",
+// CO → "6 CO"), so picking one fills the other.
+const CLASS_OPTIONS = ["MOOE", "PS", "CO"];
+const CLASS_TYPE_BY_CLASS: Record<string, string> = { MOOE: "2 MOOE", PS: "1 PS", CO: "6 CO" };
+const CLASS_TYPE_OPTIONS = Object.values(CLASS_TYPE_BY_CLASS);
+const SARO_NO_PATTERN = /^\d{4}-\d{2}-\d{4}[A-Za-z]?$/;
+
+const todayIso = () => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Notes / Validity is always "Valid for obligation until December 31, <year>"
+// in the sheets — pick the year instead of retyping the sentence.
+const validityOptions = (): string[] => {
+  const y = new Date().getFullYear();
+  return [y - 1, y, y + 1, y + 2, y + 3].map((yr) => `Valid for obligation until December 31, ${yr}`);
+};
+
+// Options ordered by how often each value already appears in the table,
+// then any extra reference values that aren't used yet.
+const rankedOptions = (used: string[], reference: string[] = []): string[] => {
+  const counts = new Map<string, number>();
+  used.map((v) => v.trim()).filter(Boolean).forEach((v) => counts.set(v, (counts.get(v) || 0) + 1));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).forEach(([v]) => { seen.add(v.toLowerCase()); out.push(v); });
+  reference.map((v) => v.trim()).filter(Boolean).forEach((v) => {
+    if (!seen.has(v.toLowerCase())) { seen.add(v.toLowerCase()); out.push(v); }
+  });
+  return out;
+};
+
+// Object codes from the reference list plus any already used on a saved SARO
+// (so a code that's missing from reference data is still selectable).
+const mergeObjectCodes = (reference: ObjectCode[], entries: ReceivedSARO[]): ObjectCode[] => {
+  const byCode = new Map<string, ObjectCode>();
+  reference.forEach((oc) => byCode.set(oc.code, oc));
+  entries.forEach((e) => e.line_items.forEach((li) => {
+    if (li.object_code && !byCode.has(li.object_code)) {
+      byCode.set(li.object_code, { id: -1, code: li.object_code, description: li.object_description });
+    }
+  }));
+  return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
+};
+
+// Native <select> that keeps showing a value even if it isn't in `options`
+// (e.g. an older record's free-text value), so editing never blanks it out.
+function SelectInput({
+  value, onChange, options, placeholder, className = "", disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const known = !value || options.some((o) => o.value === value);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+    >
+      <option value="">{placeholder}</option>
+      {!known && <option value={value}>{value}</option>}
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
 
 const swalTheme = {
   background: "hsl(var(--background))",
@@ -159,12 +243,29 @@ function LineItemsEditor({
   onAddFromObjectCode: (oc: ObjectCode) => void;
   onRemoveLine: (index: number) => void;
 }) {
+  const ocByCode = new Map(objectCodeList.map((oc) => [oc.code, oc]));
+  const objectCodeOptions = objectCodeList.map((oc) => ({ value: oc.code, label: `${oc.code} — ${oc.description}` }));
+
+  // Picking a code fills its description; entering NCA keeps Balance = Amount − NCA.
+  const changeLine = (i: number, field: keyof LineItemForm, value: string) => {
+    onUpdateLine(i, field, value);
+    if (field === "object_code") {
+      const oc = ocByCode.get(value);
+      if (oc) onUpdateLine(i, "object_description", oc.description);
+    }
+    if (field === "amount" || field === "nca_amount") {
+      const amount = field === "amount" ? value : lines[i].amount;
+      const nca = field === "nca_amount" ? value : lines[i].nca_amount;
+      if (nca !== "" && amount !== "") onUpdateLine(i, "balance", (Number(amount) - Number(nca)).toFixed(2));
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2 gap-3 sm:flex-col sm:items-stretch">
         <p className="text-sm font-semibold text-foreground">Object Code Breakdown</p>
-        <div className="flex items-center gap-2">
-          <div className="w-56">
+        <div className="flex items-center gap-2 sm:flex-wrap">
+          <div className="w-56 sm:w-full">
             <QuickFillSelect
               placeholder="+ Add line from Object Code list…"
               items={objectCodeList}
@@ -177,9 +278,56 @@ function LineItemsEditor({
           </Button>
         </div>
       </div>
-      <div className="overflow-x-auto border border-border rounded-lg">
-        <div className="min-w-[900px]">
-          <div className="grid grid-cols-[110px_1.5fr_110px_110px_120px_110px_110px_36px] gap-2 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      {/* Phones: one stacked card per line instead of a wide table */}
+      <div className="hidden sm:flex flex-col gap-3">
+        {lines.map((li, i) => (
+          <div key={i} className="rounded-lg border border-border p-3 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Line {i + 1}</span>
+              <button type="button" onClick={() => onRemoveLine(i)} className="p-1.5 -mr-1.5 text-muted-foreground hover:text-destructive transition" aria-label={`Remove line ${i + 1}`}>
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+            <SelectInput
+              value={li.object_code}
+              onChange={(v) => changeLine(i, "object_code", v)}
+              options={objectCodeOptions}
+              placeholder="Select object code…"
+            />
+            <Input
+              placeholder="Description"
+              value={li.object_description}
+              readOnly={ocByCode.has(li.object_code)}
+              onChange={(e) => onUpdateLine(i, "object_description", e.target.value)}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ["Amount", "amount", "number"],
+                ["NCA Amount", "nca_amount", "number"],
+                ["NCA Date", "nca_date", "date"],
+                ["NTA No.", "nta_no", "text"],
+                ["Balance", "balance", "number"],
+              ] as const).map(([label, key, type]) => (
+                <label key={key} className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
+                  {label}
+                  <Input
+                    className="h-9 text-sm text-foreground"
+                    type={type}
+                    step={type === "number" ? "0.01" : undefined}
+                    min={type === "number" && key !== "balance" ? "0" : undefined}
+                    inputMode={type === "number" ? "decimal" : undefined}
+                    value={li[key]}
+                    onChange={(e) => (key === "amount" || key === "nca_amount" ? changeLine(i, key, e.target.value) : onUpdateLine(i, key, e.target.value))}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="overflow-x-auto border border-border rounded-lg sm:hidden">
+        <div className="min-w-[1000px]">
+          <div className="grid grid-cols-[1.4fr_1.2fr_110px_110px_120px_110px_110px_36px] gap-2 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Object Code</span>
             <span>Description</span>
             <span>Amount</span>
@@ -190,14 +338,25 @@ function LineItemsEditor({
             <span />
           </div>
           {lines.map((li, i) => (
-            <div key={i} className="grid grid-cols-[110px_1.5fr_110px_110px_120px_110px_110px_36px] gap-2 px-3 py-2 border-b border-border last:border-0 items-center">
-              <Input className="h-8 text-xs" value={li.object_code} onChange={(e) => onUpdateLine(i, "object_code", e.target.value)} />
-              <Input className="h-8 text-xs" value={li.object_description} onChange={(e) => onUpdateLine(i, "object_description", e.target.value)} />
-              <Input className="h-8 text-xs" type="number" step="0.01" value={li.amount} onChange={(e) => onUpdateLine(i, "amount", e.target.value)} />
-              <Input className="h-8 text-xs" type="number" step="0.01" value={li.nca_amount} onChange={(e) => onUpdateLine(i, "nca_amount", e.target.value)} />
+            <div key={i} className="grid grid-cols-[1.4fr_1.2fr_110px_110px_120px_110px_110px_36px] gap-2 px-3 py-2 border-b border-border last:border-0 items-center">
+              <SelectInput
+                className="h-8 px-2 text-xs"
+                value={li.object_code}
+                onChange={(v) => changeLine(i, "object_code", v)}
+                options={objectCodeOptions}
+                placeholder="Select object code…"
+              />
+              <Input
+                className="h-8 text-xs"
+                value={li.object_description}
+                readOnly={ocByCode.has(li.object_code)}
+                onChange={(e) => onUpdateLine(i, "object_description", e.target.value)}
+              />
+              <Input className="h-8 text-xs" type="number" step="0.01" min="0" value={li.amount} onChange={(e) => changeLine(i, "amount", e.target.value)} />
+              <Input className="h-8 text-xs" type="number" step="0.01" min="0" value={li.nca_amount} onChange={(e) => changeLine(i, "nca_amount", e.target.value)} />
               <Input className="h-8 text-xs" type="date" value={li.nca_date} onChange={(e) => onUpdateLine(i, "nca_date", e.target.value)} />
               <Input className="h-8 text-xs" value={li.nta_no} onChange={(e) => onUpdateLine(i, "nta_no", e.target.value)} />
-              <Input className="h-8 text-xs" type="number" step="0.01" value={li.balance} onChange={(e) => onUpdateLine(i, "balance", e.target.value)} />
+              <Input className="h-8 text-xs" type="number" step="0.01" value={li.balance} onChange={(e) => onUpdateLine(i, "balance", e.target.value)} title="Auto = Amount − NCA Amount" />
               <button type="button" onClick={() => onRemoveLine(i)} className="text-muted-foreground hover:text-destructive transition">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -213,16 +372,16 @@ function LineItemsEditor({
 // Add / Edit dialog — header fields + dynamic object-code line items
 // ─────────────────────────────────────────────────────────────────────────
 function EntryFormDialog({
-  open, onOpenChange, editing, onSaved, papList, classTypeList, fundSourceList, objectCodeList,
+  open, onOpenChange, editing, onSaved, papList, fundSourceList, objectCodeList, entries,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing: ReceivedSARO | null;
   onSaved: () => void;
   papList: PAP[];
-  classTypeList: ClassType[];
   fundSourceList: FundSource[];
   objectCodeList: ObjectCode[];
+  entries: ReceivedSARO[];
 }) {
   const [header, setHeader] = useState<HeaderForm>(emptyHeader());
   const [lines, setLines] = useState<LineItemForm[]>([emptyLineItem()]);
@@ -231,7 +390,7 @@ function EntryFormDialog({
 
   useEffect(() => {
     if (open) {
-      setHeader(editing ? entryToHeaderForm(editing) : emptyHeader());
+      setHeader(editing ? entryToHeaderForm(editing) : { ...emptyHeader(), date_received: todayIso() });
       setLines(editing ? entryToLineItemForms(editing) : [emptyLineItem()]);
       setError(null);
     }
@@ -239,6 +398,31 @@ function EntryFormDialog({
 
   const updateHeader = (field: keyof HeaderForm, value: string) =>
     setHeader((prev) => ({ ...prev, [field]: value }));
+
+  const fundTypeOptions = useMemo(
+    () => rankedOptions(entries.map((e) => e.fund_type), fundSourceList.map((f) => f.name)),
+    [entries, fundSourceList]
+  );
+  // PAP: reference list plus any PAP already used on a saved SARO.
+  const papOptions = useMemo(() => {
+    const byCode = new Map<string, string>();
+    papList.forEach((p) => byCode.set(p.code, p.name));
+    entries.forEach((e) => { if (e.pap_code && !byCode.has(e.pap_code)) byCode.set(e.pap_code, e.pap_name); });
+    return Array.from(byCode.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([code, name]) => ({ value: code, label: `${code} — ${name}` }));
+  }, [papList, entries]);
+  const papNameByCode = useMemo(() => new Map(papOptions.map((o) => [o.value, o.label.split(" — ").slice(1).join(" — ")])), [papOptions]);
+  const validityChoices = useMemo(() => validityOptions(), []);
+  // Purposes already used on saved SAROs, most recently received first.
+  const purposeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return [...entries]
+      .sort((a, b) => (b.date_received || "").localeCompare(a.date_received || "") || b.id - a.id)
+      .map((e) => (e.particulars || "").trim())
+      .filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+  }, [entries]);
+  const linesTotal = lines.reduce((t, li) => t + (Number(li.amount) || 0), 0);
 
   const updateLine = (index: number, field: keyof LineItemForm, value: string) =>
     setLines((prev) => prev.map((li, i) => (i === index ? { ...li, [field]: value } : li)));
@@ -252,6 +436,18 @@ function EntryFormDialog({
   const handleSubmit = async () => {
     if (!header.saro_no.trim() || !header.date_received) {
       setError("Allotment No. and Date Received are required.");
+      return;
+    }
+    if (!SARO_NO_PATTERN.test(header.saro_no.trim())) {
+      setError("Allotment No. must look like 2026-01-0120 (year-month-number, with an optional letter, e.g. 2026-01-0031A).");
+      return;
+    }
+    if (header.date_of_saro && header.date_received && header.date_of_saro > header.date_received) {
+      setError("Date of SARO can't be later than the date it was received in email.");
+      return;
+    }
+    if (lines.some((li) => li.amount.trim() && !li.object_code.trim())) {
+      setError("Every line with an amount needs an Object Code.");
       return;
     }
     setSaving(true);
@@ -316,58 +512,69 @@ function EntryFormDialog({
               <Input type="date" value={header.date_of_saro} onChange={(e) => updateHeader("date_of_saro", e.target.value)} />
             ))}
             {field("Class", (
-              <Input value={header.classification} onChange={(e) => updateHeader("classification", e.target.value)} placeholder="MOOE / PS" />
+              <SelectInput
+                value={header.classification}
+                onChange={(v) => {
+                  updateHeader("classification", v);
+                  if (CLASS_TYPE_BY_CLASS[v]) updateHeader("class_type_label", CLASS_TYPE_BY_CLASS[v]);
+                }}
+                options={CLASS_OPTIONS.map((c) => ({ value: c, label: c }))}
+                placeholder="Select class…"
+              />
             ))}
             {field("Class Type", (
-              <>
-                <QuickFillSelect
-                  placeholder="Pick from Class Type list…"
-                  items={classTypeList}
-                  getLabel={(ct) => `${ct.code} — ${ct.name}`}
-                  onPick={(ct) => updateHeader("class_type_label", ct.code)}
-                />
-                <Input value={header.class_type_label} onChange={(e) => updateHeader("class_type_label", e.target.value)} placeholder="2 MOOE" />
-              </>
+              <SelectInput
+                value={header.class_type_label}
+                onChange={(v) => updateHeader("class_type_label", v)}
+                options={CLASS_TYPE_OPTIONS.map((c) => ({ value: c, label: c }))}
+                placeholder="Select class type…"
+              />
             ))}
             {field("Fund Type", (
-              <>
-                <QuickFillSelect
-                  placeholder="Pick from Fund Type list…"
-                  items={fundSourceList}
-                  getLabel={(fs) => `${fs.code} — ${fs.name}`}
-                  onPick={(fs) => updateHeader("fund_type", fs.name)}
-                />
-                <Input value={header.fund_type} onChange={(e) => updateHeader("fund_type", e.target.value)} placeholder="CURRENT" />
-              </>
+              <SelectInput
+                value={header.fund_type}
+                onChange={(v) => updateHeader("fund_type", v)}
+                options={fundTypeOptions.map((f) => ({ value: f, label: f }))}
+                placeholder="Select fund type…"
+              />
             ))}
             <div className="col-span-2 slg:col-span-1">
-              {field("PAP (pick from list, or type manually below)", (
-                <QuickFillSelect
-                  placeholder="Pick from PAP list…"
-                  items={papList}
-                  getLabel={(p) => `${p.code} — ${p.name}`}
-                  onPick={(p) => { updateHeader("pap_code", p.code); updateHeader("pap_name", p.name); }}
+              {field("PAP", (
+                <SelectInput
+                  value={header.pap_code}
+                  onChange={(code) => {
+                    updateHeader("pap_code", code);
+                    updateHeader("pap_name", code ? papNameByCode.get(code) || "" : "");
+                  }}
+                  options={papOptions}
+                  placeholder="Select PAP…"
                 />
               ))}
-              <div className="grid grid-cols-2 gap-2 mt-1.5">
-                <Input placeholder="PAP Code" value={header.pap_code} onChange={(e) => updateHeader("pap_code", e.target.value)} />
-                <Input placeholder="PAP Name" value={header.pap_name} onChange={(e) => updateHeader("pap_name", e.target.value)} />
-              </div>
             </div>
-            {field("Total Amount", (
-              <Input type="number" step="0.01" value={header.amount} onChange={(e) => updateHeader("amount", e.target.value)} placeholder="Auto-sums from lines if left blank" />
+            {field("Total Amount (sum of lines)", (
+              <>
+                <Input value={formatMoney(linesTotal)} readOnly tabIndex={-1} className="font-medium bg-muted/40 cursor-not-allowed select-none" />
+                <p className="text-[11px] text-muted-foreground">Automatic — enter amounts in the Object Code lines below.</p>
+              </>
             ))}
-            {field("Region", (
-              <Input value={header.region} onChange={(e) => updateHeader("region", e.target.value)} />
-            ))}
-            <div className="col-span-2 slg:col-span-1">
+            <div className="col-span-3 slg:col-span-2 sm:col-span-1">
               {field("Purpose", (
-                <Input value={header.particulars} onChange={(e) => updateHeader("particulars", e.target.value)} />
+                <ComboInput
+                  value={header.particulars}
+                  onChange={(v) => updateHeader("particulars", v)}
+                  options={purposeOptions}
+                  placeholder="Search a previous purpose, or type a new one…"
+                />
               ))}
             </div>
             <div className="col-span-3 slg:col-span-2 sm:col-span-1">
               {field("Notes / Validity", (
-                <Input value={header.validity_notes} onChange={(e) => updateHeader("validity_notes", e.target.value)} placeholder="Valid for obligation until December 31, 2026" />
+                <SelectInput
+                  value={header.validity_notes}
+                  onChange={(v) => updateHeader("validity_notes", v)}
+                  options={validityChoices.map((v) => ({ value: v, label: v }))}
+                  placeholder="Select validity…"
+                />
               ))}
             </div>
           </div>
@@ -717,6 +924,9 @@ const ReceivedSaroPage = () => {
   const [viewing, setViewing] = useState<ReceivedSARO | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  const [sheetSources, setSheetSources] = useState<SheetSyncSource[]>([]);
+  // "Sync Sheets" opens the Sheet Setup dialog straight on its review step (same flow as Bulk Import).
+  const [sheetSyncAuto, setSheetSyncAuto] = useState(false);
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -731,6 +941,8 @@ const ReceivedSaroPage = () => {
     try {
       const data = await receivedSaroApi.list({ archived: showArchived });
       setEntries(data);
+      // Linked sheets, for the "by sheet" total — a failure here must never block the list.
+      sheetSyncApi.list("received_saro").then(setSheetSources).catch(() => setSheetSources([]));
     } finally {
       setLoading(false);
     }
@@ -749,6 +961,8 @@ const ReceivedSaroPage = () => {
     fundSourceApi.list().then(setFundSourceList);
     objectCodeApi.list().then(setObjectCodeList);
   }, []);
+
+  const allObjectCodes = useMemo(() => mergeObjectCodes(objectCodeList, entries), [objectCodeList, entries]);
 
   const availableYears = useMemo(() => {
     const years = new Set<number>();
@@ -787,6 +1001,46 @@ const ReceivedSaroPage = () => {
       );
     });
   }, [entries, search, papFilter, inRange]);
+
+  // One line per linked sheet (matched by the year set on the sheet), plus any SAROs with no linked sheet.
+  const sheetTotals = useMemo(() => {
+    const byYear = new Map<string, number>();
+    filtered.forEach((e) => {
+      const key = e.year ? String(e.year) : "none";
+      byYear.set(key, (byYear.get(key) || 0) + Number(e.amount || 0));
+    });
+    const labelFor = (key: string): { label: string; note?: string } => {
+      if (key === "none") return { label: "No linked sheet / added by hand" };
+      const names = sheetSources.filter((s) => String(s.year) === key).map((s) => s.label || "(untitled sheet)");
+      return names.length
+        ? { label: names.join(" + "), note: `${key} sheet` }
+        : { label: `${key} (sheet no longer linked)`, note: `${key}` };
+    };
+    return Array.from(byYear.entries())
+      .sort((a, b) => (a[0] === "none" ? 1 : b[0] === "none" ? -1 : Number(b[0]) - Number(a[0])))
+      .map(([key, value]) => ({ ...labelFor(key), value }));
+  }, [filtered, sheetSources]);
+
+  // The four most recently added SAROs (by when each record was created), whatever the filters.
+  const recentSaros = useMemo(
+    () => [...entries]
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "") || b.id - a.id)
+      .slice(0, 4)
+      .map((e) => {
+        const added = e.created_at ? new Date(e.created_at) : null;
+        const addedText = added && !Number.isNaN(added.getTime())
+          ? `Added ${added.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`
+          : "";
+        return {
+          key: e.id,
+          label: `${e.saro_no}${e.year ? ` (${e.year})` : ""}`,
+          note: [addedText, e.pap_name].filter(Boolean).join(" · ") || undefined,
+          value: Number(e.amount || 0),
+          onClick: () => setViewing(e),
+        };
+      }),
+    [entries]
+  );
 
   // Per-column sort + filter on top of the search/date filters above.
   const { sortKey, sortDir, toggleSort, applySort } = useTableSort<ReceivedSARO>((row, key) => {
@@ -949,13 +1203,13 @@ const ReceivedSaroPage = () => {
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[220px]"
         >
           <option value="">All PAP / Projects</option>
-          {papOptions.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+          {labelPapOptions(papOptions).map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
         </select>
       </DateRangeFilterBar>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -969,19 +1223,19 @@ const ReceivedSaroPage = () => {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={handleSync} disabled={syncing} title="Sync from Google Sheets">
-            <Settings className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Syncing…' : 'Sync Sheets'}
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(true); setSheetSetupOpen(true); }} title="Sync from Google Sheets — review the rows before saving">
+            <Settings className={`w-4 h-4 mr-2 slg:mr-0 ${syncing ? 'animate-spin' : ''}`} />
+            <span className="slg:hidden">{syncing ? 'Syncing…' : 'Sync Sheets'}</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Manage Google Sheet sources">
-            <Link2 className="w-4 h-4 mr-2" /> Sheet Setup
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(false); setSheetSetupOpen(true); }} title="Manage Google Sheet sources">
+            <Link2 className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Sheet Setup</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-2 text-foreground" /> Bulk Import
+          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)} title="Bulk Import" aria-label="Bulk Import">
+            <Upload className="w-4 h-4 mr-2 slg:mr-0 text-foreground" /> <span className="slg:hidden">Bulk Import</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0}>
-            <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0} title="Delete All" aria-label="Delete All">
+            <AlertTriangle className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Delete All</span>
           </Button>
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add Entry
@@ -990,11 +1244,32 @@ const ReceivedSaroPage = () => {
       </div>
 
       {/* KPI Strip */}
-      <KpiStrip cards={[
-        { title: "Total Allotment", value: formatMoney(filtered.reduce((s, x) => s + Number(x.amount || 0), 0)), icon: FileText },
-        { title: "Total Line Items", value: String(filtered.reduce((s, x) => s + x.line_items.length, 0)), caption: `${filtered.length} SARO(s)`, icon: Wallet },
-        // { title: "Total NCA Amount", value: formatMoney(filtered.reduce((s, x) => s + x.line_items.reduce((t, li) => t + Number(li.nca_amount || 0), 0), 0)), icon: Scale },
-      ]} />
+      <KpiStrip
+        gridClassName="grid-cols-2 slg:grid-cols-1"
+        cards={[]}
+        leading={
+          <SheetTotalsCard
+            title="Total Allotment — by linked sheet"
+            subtitle="Each sheet's SAROs added together"
+            rows={sheetTotals}
+            extras={[
+              {
+                label: "Total Line Items",
+                value: String(filtered.reduce((n, x) => n + x.line_items.length, 0)),
+                note: `Sheet column: "Object Code no." (one per row) · ${filtered.length} SARO(s)`,
+              },
+            ]}
+          />
+        }
+        trailing={
+          <TopListCard
+            ranked={false}
+            title="Recently added SARO"
+            subtitle="The 4 most recently added, regardless of filters — click to open"
+            items={recentSaros}
+          />
+        }
+      />
 
       <BulkActionBar count={selected.size} itemLabel="received SARO" onDelete={handleBulkDelete} onClear={clearSelection} />
 
@@ -1002,7 +1277,7 @@ const ReceivedSaroPage = () => {
         <TableSkeleton rows={6} />
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="grid grid-cols-[24px_24px_1.4fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.4fr_1fr_auto]">
+          <div className="grid grid-cols-[24px_24px_1.4fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[24px_24px_1.4fr_1fr_auto]">
             <SelectAllCheckbox checked={isAllSelected(pageIds)} indeterminate={isSomeSelected(pageIds)} onChange={() => toggleAll(pageIds)} />
             <span />
             <SortFilterHeader label="Allotment No." sortKey="saro_no" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
@@ -1033,7 +1308,7 @@ const ReceivedSaroPage = () => {
               <div key={entry.id}>
                 <div
                   onClick={() => setViewing(entry)}
-                  className="grid grid-cols-[24px_24px_1.4fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.4fr_1fr_auto] cursor-pointer"
+                  className="grid grid-cols-[24px_24px_1.4fr_1fr_1.6fr_1fr_1fr_auto] gap-4 px-5 sm:gap-2 sm:px-3 py-3.5 border-b border-border items-center hover:bg-accent/40 transition-colors slg:grid-cols-[24px_24px_1.4fr_1fr_auto] cursor-pointer"
                 >
                   <input
                     type="checkbox"
@@ -1045,12 +1320,15 @@ const ReceivedSaroPage = () => {
                     {expanded.has(entry.id) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   </button>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {entry.saro_no}
-                      {entry.is_archived && (
-                        <Badge variant="destructive" className="ml-2">archived</Badge>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="text-sm font-medium text-foreground truncate sm:whitespace-normal sm:break-words">{entry.saro_no}</p>
+                      {entry.year && (
+                        <Badge variant="outline" title={`${entry.year} sheet`}>{entry.year}</Badge>
                       )}
-                    </p>
+                      {entry.is_archived && (
+                        <Badge variant="destructive">archived</Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground truncate">{entry.classification || "—"} · {entry.class_type_label || "—"}</p>
                   </div>
                   <p className="text-sm text-foreground slg:hidden">{formatDate(entry.date_received)}</p>
@@ -1058,13 +1336,13 @@ const ReceivedSaroPage = () => {
                   <div className="min-w-0 slg:hidden"><CategoryChip label={entry.fund_type} /></div>
                   <p className="text-sm font-medium text-foreground">{formatMoney(entry.amount)}</p>
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => handleEdit(entry)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                    <button onClick={() => handleEdit(entry)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => handleArchiveToggle(entry)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={entry.is_archived ? "Unarchive" : "Archive"}>
+                    <button onClick={() => handleArchiveToggle(entry)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={entry.is_archived ? "Unarchive" : "Archive"}>
                       {entry.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                     </button>
-                    <button onClick={() => handleDelete(entry)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                    <button onClick={() => handleDelete(entry)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1130,20 +1408,21 @@ const ReceivedSaroPage = () => {
 
       <EntryFormDialog
         open={formOpen} onOpenChange={setFormOpen} editing={editing} onSaved={load}
-        papList={papList} classTypeList={classTypeList} fundSourceList={fundSourceList} objectCodeList={objectCodeList}
+        papList={papList} fundSourceList={fundSourceList} objectCodeList={allObjectCodes} entries={entries}
       />
       <ImportDialog
         open={importOpen} onOpenChange={setImportOpen} onImported={load}
-        entries={entries} objectCodeList={objectCodeList}
+        entries={entries} objectCodeList={allObjectCodes}
       />
       <ReceivedSaroDetailDialog entry={viewing} open={!!viewing} onOpenChange={(open) => !open && setViewing(null)} />
-      <SheetSyncManagerDialog open={sheetSetupOpen} onOpenChange={setSheetSetupOpen} table="received_saro" label="Received SARO" onSynced={load} />
+      <SheetSyncManagerDialog open={sheetSetupOpen} autoPreview={sheetSyncAuto} onOpenChange={setSheetSetupOpen} table="received_saro" label="Received SARO" onSynced={load} />
     </AdminLayout>
   );
 };
 
 export default ReceivedSaroPage;
 function extractError(err: unknown): string | undefined {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   throw new Error("Function not implemented.");
 }
 

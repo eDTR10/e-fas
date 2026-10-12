@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
   Search, Plus, Upload, Trash2, Pencil, FileText, Wallet, CheckCircle2, Clock, Archive, ArchiveRestore, AlertTriangle,
@@ -31,6 +32,7 @@ import { SheetSyncManagerDialog } from "../../components/admin/SheetSyncManagerD
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`).join(" | ");
@@ -296,7 +298,7 @@ function ImportDialog({
                 </div>
               )}
               <div className="border border-border rounded-lg overflow-hidden max-h-[55vh] overflow-y-auto">
-                <div className="grid grid-cols-[24px_100px_1fr_140px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
+                <div className="grid grid-cols-[24px_100px_1fr_140px_120px_auto] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0 sm:hidden">
                   <span />
                   <span>Date</span>
                   <span>Claimant</span>
@@ -305,22 +307,22 @@ function ImportDialog({
                   <span>Status</span>
                 </div>
                 {rows.map((r, i) => (
-                  <div key={i} className={`grid grid-cols-[24px_100px_1fr_140px_120px_auto] gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate ? "opacity-60" : ""}`}>
+                  <div key={i} className={`grid grid-cols-[24px_100px_1fr_140px_120px_auto] sm:grid-cols-[24px_1fr] sm:gap-y-0.5 gap-3 px-3 py-2.5 border-b border-border last:border-0 items-center text-sm ${r.is_duplicate ? "opacity-60" : ""}`}>
                     <input
                       type="checkbox"
                       checked={r.included}
                       onChange={() => setRows((prev) => prev && prev.map((x, j) => (j === i ? { ...x, included: !x.included } : x)))}
                     />
-                    <span className="text-xs text-foreground truncate">{r.date_received || "—"}</span>
-                    <span className="text-xs text-foreground truncate" title={r.claimant}>{r.claimant || "—"}</span>
-                    <span className="text-xs text-foreground truncate">{r.dv_number || "—"}</span>
-                    <span className="text-xs text-foreground">{r.net_amount != null ? formatMoney(r.net_amount) : "—"}</span>
+                    <span className="text-xs text-foreground truncate sm:col-start-2">{r.date_received || "—"}</span>
+                    <span className="text-xs text-foreground truncate sm:col-start-2" title={r.claimant}>{r.claimant || "—"}</span>
+                    <span className="text-xs text-foreground truncate sm:col-start-2">DV {r.dv_number || "—"}</span>
+                    <span className="text-xs text-foreground sm:col-start-2">{r.net_amount != null ? formatMoney(r.net_amount) : "—"}</span>
                     {r.missing_required ? (
-                      <Badge variant="destructive">missing amount</Badge>
+                      <Badge variant="destructive" className="sm:col-start-2 w-fit">missing amount</Badge>
                     ) : r.is_duplicate ? (
-                      <Badge variant="secondary">duplicate</Badge>
+                      <Badge variant="secondary" className="sm:col-start-2 w-fit">duplicate</Badge>
                     ) : (
-                      <Badge variant="success">new</Badge>
+                      <Badge variant="success" className="sm:col-start-2 w-fit">new</Badge>
                     )}
                   </div>
                 ))}
@@ -351,6 +353,8 @@ const CashieringTrackerPage = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [sheetSetupOpen, setSheetSetupOpen] = useState(false);
+  // "Sync Sheets" opens the Sheet Setup dialog straight on its review step (same flow as Bulk Import).
+  const [sheetSyncAuto, setSheetSyncAuto] = useState(false);
   const [editing, setEditing] = useState<CashieringTrackerEntry | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -568,8 +572,8 @@ const CashieringTrackerPage = () => {
         </select>
       </DateRangeFilterBar>
 
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -583,19 +587,19 @@ const CashieringTrackerPage = () => {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived
         </label>
-        <div className="flex gap-2 ml-auto sm:ml-0">
-          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-2" /> Bulk Import
+        <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => setImportOpen(true)} title="Bulk Import" aria-label="Bulk Import">
+            <Upload className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Bulk Import</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleSync} disabled={syncing} title="Sync from Google Sheets">
-            <Settings className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing…" : "Sync Sheets"}
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(true); setSheetSetupOpen(true); }} title="Sync from Google Sheets — review the rows before saving">
+            <Settings className={`w-4 h-4 mr-2 slg:mr-0 ${syncing ? "animate-spin" : ""}`} />
+            <span className="slg:hidden">{syncing ? "Syncing…" : "Sync Sheets"}</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Manage Google Sheet sources">
-            <Link2 className="w-4 h-4 mr-2" /> Sheet Setup
+          <Button variant="outline" className="text-foreground" onClick={() => { setSheetSyncAuto(false); setSheetSetupOpen(true); }} title="Manage Google Sheet sources">
+            <Link2 className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Sheet Setup</span>
           </Button>
-          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0}>
-            <AlertTriangle className="w-4 h-4 mr-2" /> Delete All
+          <Button variant="outline" className="text-foreground" onClick={handleDeleteAll} disabled={entries.length === 0} title="Delete All" aria-label="Delete All">
+            <AlertTriangle className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Delete All</span>
           </Button>
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2" /> Add Entry
@@ -604,10 +608,10 @@ const CashieringTrackerPage = () => {
       </div>
 
       <KpiStrip cards={[
-        { title: "Total DVs", value: String(filtered.length), icon: FileText },
-        { title: "Total Net Amount", value: formatMoney(totalNetAmount), icon: Wallet },
-        { title: "Paid", value: String(paidCount), icon: CheckCircle2 },
-        { title: "Pending", value: String(pendingCount), icon: Clock },
+        { title: "Total DVs", subtitle: 'Sheet column: "DV NUMBER" (row count)', value: String(filtered.length), icon: FileText },
+        { title: "Total Net Amount", subtitle: 'Sheet column: "NET AMOUNT OF DV"', value: formatMoney(totalNetAmount), icon: Wallet },
+        { title: "Paid", subtitle: 'Sheet columns: "DATE PAID ADA/CHECK" or "STATUS OF DOCUMENTS" = Complete', value: String(paidCount), icon: CheckCircle2 },
+        { title: "Pending", subtitle: 'Rows not yet counted as Paid', value: String(pendingCount), icon: Clock },
       ]} />
 
       <BulkActionBar
@@ -627,50 +631,63 @@ const CashieringTrackerPage = () => {
         <TableSkeleton rows={6} />
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-x-auto">
-          <div className="grid grid-cols-[24px_90px_1fr_120px_110px_130px_130px_130px_auto] gap-3 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide min-w-[1200px]">
+          <div className="grid grid-cols-[24px_90px_1fr_120px_110px_130px_130px_130px_auto] slg:grid-cols-[24px_1fr_auto_auto] gap-3 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide min-w-[1200px] slg:min-w-0">
             <SelectAllCheckbox checked={isAllSelected(pageIds)} indeterminate={isSomeSelected(pageIds)} onChange={() => toggleAll(pageIds)} />
-            <SortFilterHeader label="Date" sortKey="date_received" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
-              filterValue={columnFilters.date_received || ""} onFilterChange={(v) => setColumnFilter("date_received", v)} filterPlaceholder="Filter…" />
+            <div className="slg:hidden">
+              <SortFilterHeader label="Date" sortKey="date_received" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
+                filterValue={columnFilters.date_received || ""} onFilterChange={(v) => setColumnFilter("date_received", v)} filterPlaceholder="Filter…" />
+            </div>
             <SortFilterHeader label="Claimant" sortKey="claimant" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
               filterValue={columnFilters.claimant || ""} onFilterChange={(v) => setColumnFilter("claimant", v)} filterPlaceholder="Filter…" />
-            <SortFilterHeader label="DV Number" sortKey="dv_number" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
-              filterValue={columnFilters.dv_number || ""} onFilterChange={(v) => setColumnFilter("dv_number", v)} filterPlaceholder="Filter…" />
+            <div className="slg:hidden">
+              <SortFilterHeader label="DV Number" sortKey="dv_number" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
+                filterValue={columnFilters.dv_number || ""} onFilterChange={(v) => setColumnFilter("dv_number", v)} filterPlaceholder="Filter…" />
+            </div>
             <SortFilterHeader label="Net Amount" sortKey="net_amount" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
               filterValue={columnFilters.net_amount || ""} onFilterChange={(v) => setColumnFilter("net_amount", v)} filterPlaceholder="Filter…" />
-            <SortFilterHeader label="Fund Cluster" sortKey="fund_cluster" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
-              filterValue={columnFilters.fund_cluster || ""} onFilterChange={(v) => setColumnFilter("fund_cluster", v)} filterPlaceholder="Filter…" />
-            <SortFilterHeader label="Status of NTCA" sortKey="status_of_ntca" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
-              filterValue={columnFilters.status_of_ntca || ""} onFilterChange={(v) => setColumnFilter("status_of_ntca", v)} filterPlaceholder="Filter…" />
-            <SortFilterHeader label="Mode of Payment" sortKey="mode_of_payment" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
-              filterValue={columnFilters.mode_of_payment || ""} onFilterChange={(v) => setColumnFilter("mode_of_payment", v)} filterPlaceholder="Filter…" />
+            <div className="slg:hidden">
+              <SortFilterHeader label="Fund Cluster" sortKey="fund_cluster" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
+                filterValue={columnFilters.fund_cluster || ""} onFilterChange={(v) => setColumnFilter("fund_cluster", v)} filterPlaceholder="Filter…" />
+            </div>
+            <div className="slg:hidden">
+              <SortFilterHeader label="Status of NTCA" sortKey="status_of_ntca" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
+                filterValue={columnFilters.status_of_ntca || ""} onFilterChange={(v) => setColumnFilter("status_of_ntca", v)} filterPlaceholder="Filter…" />
+            </div>
+            <div className="slg:hidden">
+              <SortFilterHeader label="Mode of Payment" sortKey="mode_of_payment" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
+                filterValue={columnFilters.mode_of_payment || ""} onFilterChange={(v) => setColumnFilter("mode_of_payment", v)} filterPlaceholder="Filter…" />
+            </div>
             <span>Actions</span>
           </div>
 
           {paginatedData.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-muted-foreground min-w-[1200px]">No Cashiering Tracker records found.</div>
+            <div className="px-5 py-10 text-center text-sm text-muted-foreground min-w-[1200px] slg:min-w-0">No Cashiering Tracker records found.</div>
           ) : (
             paginatedData.map((e) => (
-              <div key={e.id} className="grid grid-cols-[24px_90px_1fr_120px_110px_130px_130px_130px_auto] gap-3 px-5 py-3 border-b border-border last:border-0 items-center text-sm min-w-[1200px] hover:bg-accent/40 transition-colors">
+              <div key={e.id} className="grid grid-cols-[24px_90px_1fr_120px_110px_130px_130px_130px_auto] slg:grid-cols-[24px_1fr_auto_auto] gap-3 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border last:border-0 items-center text-sm min-w-[1200px] slg:min-w-0 hover:bg-accent/40 transition-colors">
                 <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)} />
-                <span className="text-foreground whitespace-nowrap">{formatDate(e.date_received)}</span>
+                <span className="text-foreground whitespace-nowrap slg:hidden">{formatDate(e.date_received)}</span>
                 <div className="min-w-0">
-                  <p className="text-foreground truncate" title={e.claimant}>{e.claimant || "—"}</p>
+                  <p className="text-foreground truncate sm:whitespace-normal sm:break-words" title={e.claimant}>{e.claimant || "—"}</p>
                   <p className="text-xs text-muted-foreground truncate" title={e.particulars}>{e.particulars || "—"}</p>
+                  <p className="hidden slg:block text-xs text-muted-foreground">
+                    {[e.dv_number && `DV ${e.dv_number}`, e.date_received && formatDate(e.date_received), e.status_of_ntca].filter(Boolean).join(" · ")}
+                  </p>
                   {e.is_archived && <Badge variant="destructive" className="mt-0.5">archived</Badge>}
                 </div>
-                <span className="text-foreground truncate">{e.dv_number || "—"}</span>
+                <span className="text-foreground truncate slg:hidden">{e.dv_number || "—"}</span>
                 <span className="text-foreground whitespace-nowrap">{formatMoney(e.net_amount)}</span>
-                <div className="min-w-0"><CategoryChip label={e.fund_cluster} /></div>
-                <div className="min-w-0"><CategoryChip label={e.status_of_ntca} /></div>
-                <div className="min-w-0"><CategoryChip label={e.mode_of_payment} /></div>
+                <div className="min-w-0 slg:hidden"><CategoryChip label={e.fund_cluster} /></div>
+                <div className="min-w-0 slg:hidden"><CategoryChip label={e.status_of_ntca} /></div>
+                <div className="min-w-0 slg:hidden"><CategoryChip label={e.mode_of_payment} /></div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => handleEdit(e)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
+                  <button onClick={() => handleEdit(e)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title="Edit">
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
-                  <button onClick={() => handleArchiveToggle(e)} className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={e.is_archived ? "Unarchive" : "Archive"}>
+                  <button onClick={() => handleArchiveToggle(e)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors" title={e.is_archived ? "Unarchive" : "Archive"}>
                     {e.is_archived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                   </button>
-                  <button onClick={() => handleDelete(e)} className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
+                  <button onClick={() => handleDelete(e)} className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" title="Delete">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -696,7 +713,7 @@ const CashieringTrackerPage = () => {
 
       <EntryFormDialog open={formOpen} onOpenChange={setFormOpen} editing={editing} onSaved={load} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={load} />
-      <SheetSyncManagerDialog open={sheetSetupOpen} onOpenChange={setSheetSetupOpen} table="cashiering_tracker" label="Cashiering Tracker" onSynced={load} />
+      <SheetSyncManagerDialog open={sheetSetupOpen} autoPreview={sheetSyncAuto} onOpenChange={setSheetSetupOpen} table="cashiering_tracker" label="Cashiering Tracker" onSynced={load} />
     </AdminLayout>
   );
 };

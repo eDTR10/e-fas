@@ -142,10 +142,11 @@ export const ntcaApi = {
     return data;
   },
 
-  confirmImport: async (rows: NTCAImportRow[]): Promise<NTCAImportResult> => {
+  confirmImport: async (rows: NTCAImportRow[], upsert = false): Promise<NTCAImportResult> => {
     const { data } = await api.post<NTCAImportResult>(`${BASE}/bulk_import/`, {
       rows,
       dry_run: "false",
+      ...(upsert ? { upsert: "true" } : {}),
     });
     return data;
   },

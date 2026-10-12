@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
@@ -80,6 +81,7 @@ const formatDate = (value: string): string => {
 };
 
 const extractError = (error: unknown): string => {
+  if (isCancelledRequest(error)) return OPERATION_CANCELLED_MESSAGE;
   const data = (error as { response?: { data?: Record<string, unknown> } })
     ?.response?.data;
   if (!data) return "The disbursement could not be saved. Please try again.";
@@ -795,8 +797,8 @@ const CustomDisbursementPage = () => {
         </div>
       </div>
 
-      <div className="mb-5 flex items-center gap-3">
-        <div>
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="min-w-0 sm:basis-full">
           <h2 className="font-semibold text-foreground">
             {MONTHS[selectedMonth]} {selectedYear} · {clusterLabel}
           </h2>
@@ -804,21 +806,21 @@ const CustomDisbursementPage = () => {
             Closing balances become the opening balances for {MONTHS[(selectedMonth + 1) % 12]}.
           </p>
         </div>
-        <Button variant="outline" className="ml-auto text-foreground" onClick={() => setTrackerOpen(true)}>
-          <ListPlus className="mr-2 h-4 w-4" />
-          Add NCA
+        <Button variant="outline" className="ml-auto slg:ml-0 text-foreground" onClick={() => setTrackerOpen(true)} title="Add NCA" aria-label="Add NCA">
+          <ListPlus className="mr-2 slg:mr-0 h-4 w-4" />
+          <span className="slg:hidden">Add NCA</span>
         </Button>
-        <Button variant="outline" className="text-foreground" onClick={() => setPasteImportOpen(true)}>
-          <ClipboardPaste className="mr-2 h-4 w-4" />
-          Paste Import
+        <Button variant="outline" className="text-foreground" onClick={() => setPasteImportOpen(true)} title="Paste Import" aria-label="Paste Import">
+          <ClipboardPaste className="mr-2 slg:mr-0 h-4 w-4" />
+          <span className="slg:hidden">Paste Import</span>
         </Button>
-        <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)}>
-          <Settings2 className="mr-2 h-4 w-4" />
-          Sheet Setup
+        <Button variant="outline" className="text-foreground" onClick={() => setSheetSetupOpen(true)} title="Sheet Setup" aria-label="Sheet Setup">
+          <Settings2 className="mr-2 slg:mr-0 h-4 w-4" />
+          <span className="slg:hidden">Sheet Setup</span>
         </Button>
-        <Button variant="outline" className="text-foreground" onClick={() => setSheetSyncOpen(true)}>
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Sync Sheets
+        <Button variant="outline" className="text-foreground" onClick={() => setSheetSyncOpen(true)} title="Sync Sheets" aria-label="Sync Sheets">
+          <RefreshCw className="mr-2 slg:mr-0 h-4 w-4" />
+          <span className="slg:hidden">Sync Sheets</span>
         </Button>
         <Button onClick={addDisbursement}>
           <Plus className="mr-2 h-4 w-4" />
@@ -866,12 +868,14 @@ const CustomDisbursementPage = () => {
         <KpiStrip cards={[
           {
             title: "Total for the month",
+            subtitle: 'Sheet columns: "NTCA" / "NCA" amount of the month tab',
             value: formatMoney(totals.opening + totals.received),
             caption: "Balance forwarded (last month) + NCA added this month",
             icon: Landmark,
           },
           {
             title: "ADA disbursed",
+            subtitle: 'Sheet columns: "ADA" + "AMOUNT" of the month tab',
             value: formatMoney(totals.disbursed),
             caption: advanceDisbursedThisMonth > 0
               ? `Incl. ${formatMoney(advanceDisbursedThisMonth)} not yet in NTCA Received`
@@ -882,6 +886,7 @@ const CustomDisbursementPage = () => {
           },
           {
             title: "Balance forwarded",
+            subtitle: "Total for the month minus ADA disbursed (computed)",
             value: formatMoney(totals.closing),
             caption: "Available for next month",
             icon: ArrowRight,
@@ -971,8 +976,8 @@ const CustomDisbursementPage = () => {
                 className="text-foreground shrink-0"
                 onClick={deleteAllDisbursements}
                 disabled={monthlyDisbursements.length === 0 || deletingAll}
-              >
-                <Trash2 className="mr-2 h-4 w-4" /> Delete All
+               title="Delete All" aria-label="Delete All">
+                <Trash2 className="mr-2 slg:mr-0 h-4 w-4" /> <span className="slg:hidden">Delete All</span>
               </Button>
             </div>
             {monthlyDisbursements.length === 0 ? (

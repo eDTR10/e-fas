@@ -1,4 +1,4 @@
-import type { InternalAxiosRequestConfig } from "axios";
+import axios, { type InternalAxiosRequestConfig } from "axios";
 
 export const OPERATION_STARTED_EVENT = "efas:operation-started";
 export const OPERATION_FINISHED_EVENT = "efas:operation-finished";
@@ -15,6 +15,17 @@ export interface OperationFinishedDetail {
 export type OperationTrackedConfig = InternalAxiosRequestConfig & {
   __efasOperationId?: string;
 };
+
+// One AbortController per tracked request, so the progress overlay's Cancel
+// button can actually stop waiting for it.
+const controllers = new Map<string, AbortController>();
+
+export const OPERATION_CANCELLED_MESSAGE =
+  "Cancelled — eFAS stopped waiting for the server. It may still finish processing in the background, so refresh and check the data before trying again.";
+
+export function cancelTrackedOperation(id: string): void {
+  controllers.get(id)?.abort();
+}
 
 const TABLE_LABELS: Record<string, string> = {
   raod: "RAOD",
@@ -64,6 +75,11 @@ export function startTrackedOperation(config: OperationTrackedConfig, label: str
   if (typeof window === "undefined") return;
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   config.__efasOperationId = id;
+  if (!config.signal) {
+    const controller = new AbortController();
+    controllers.set(id, controller);
+    config.signal = controller.signal;
+  }
   window.dispatchEvent(new CustomEvent<OperationStartedDetail>(OPERATION_STARTED_EVENT, {
     detail: { id, label },
   }));
@@ -71,8 +87,12 @@ export function startTrackedOperation(config: OperationTrackedConfig, label: str
 
 export function finishTrackedOperation(config?: OperationTrackedConfig): void {
   if (typeof window === "undefined" || !config?.__efasOperationId) return;
+  controllers.delete(config.__efasOperationId);
   window.dispatchEvent(new CustomEvent<OperationFinishedDetail>(OPERATION_FINISHED_EVENT, {
     detail: { id: config.__efasOperationId },
   }));
   delete config.__efasOperationId;
 }
+
+// True when a request was stopped by the user pressing Cancel on the progress overlay.
+export const isCancelledRequest = (err: unknown): boolean => axios.isCancel(err);

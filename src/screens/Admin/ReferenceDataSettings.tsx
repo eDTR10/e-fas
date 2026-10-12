@@ -1,3 +1,4 @@
+import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useState } from "react";
 import { Search, Plus, Pencil, Trash2, Upload, AlertTriangle } from "lucide-react";
 import Swal from "sweetalert2";
@@ -21,6 +22,7 @@ import { FUND_CLUSTER_OPTIONS } from "../../lib/ntcaApi";
 const swalTheme = { background: "hsl(var(--background))", color: "hsl(var(--foreground))" };
 
 function extractError(err: unknown): string {
+  if (isCancelledRequest(err)) return OPERATION_CANCELLED_MESSAGE;
   const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
   if (!data) return "Failed to save. Please try again.";
   return Object.entries(data)
@@ -521,14 +523,14 @@ function LookupTable<T extends LookupItem>({
             className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <Button size="sm" onClick={openAdd} className="ml-auto">
+        <Button size="sm" onClick={openAdd} className="ml-auto slg:ml-0">
           <Plus className="w-3.5 h-3.5 mr-1" /> Add
         </Button>
       </div>
 
       {loading ? <TableSkeleton rows={4} /> : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[140px_1fr_70px] gap-3 px-4 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[140px_1fr_70px] sm:grid-cols-[96px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>{codeLabel}</span>
             <span>{nameLabel}</span>
             <span />
@@ -540,14 +542,14 @@ function LookupTable<T extends LookupItem>({
               filtered.map((item) => {
                 const record = item as unknown as Record<string, unknown>;
                 return (
-                  <div key={item.id} className="grid grid-cols-[140px_1fr_70px] gap-3 px-4 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
+                  <div key={item.id} className="grid grid-cols-[140px_1fr_70px] sm:grid-cols-[96px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
                     <span className="font-mono text-xs text-foreground truncate">{String(record[codeKey])}</span>
                     <span className="text-foreground truncate">{String(record[nameKey])}</span>
                     <div className="flex gap-1 justify-end">
-                      <button onClick={() => openEdit(item)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                      <button onClick={() => openEdit(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => handleDelete(item)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                      <button onClick={() => handleDelete(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -726,7 +728,7 @@ function PapTable() {
             className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <div className="flex gap-2 ml-auto">
+        <div className="flex gap-2 ml-auto slg:ml-0">
           <Button size="sm" variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
             <Upload className="w-3.5 h-3.5 mr-1" /> Bulk Import
           </Button>
@@ -741,11 +743,11 @@ function PapTable() {
 
       {loading ? <TableSkeleton rows={4} /> : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[160px_1fr_160px_120px_70px] gap-3 px-4 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[160px_1fr_160px_120px_70px] sm:grid-cols-[104px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>PAP Code</span>
             <span>PAP Name</span>
-            <span>Fund / Class</span>
-            <span>Fund Cluster</span>
+            <span className="sm:hidden">Fund / Class</span>
+            <span className="sm:hidden">Fund Cluster</span>
             <span />
           </div>
           <div className="max-h-[360px] overflow-y-auto">
@@ -753,20 +755,20 @@ function PapTable() {
               <div className="px-4 py-6 text-sm text-muted-foreground text-center">No entries.</div>
             ) : (
               filtered.map((item) => (
-                <div key={item.id} className="grid grid-cols-[160px_1fr_160px_120px_70px] gap-3 px-4 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
-                  <span className="font-mono text-xs text-foreground truncate">{item.code}</span>
-                  <span className="text-foreground truncate">{item.name}</span>
-                  <span className="text-xs text-muted-foreground truncate">
+                <div key={item.id} className="grid grid-cols-[160px_1fr_160px_120px_70px] sm:grid-cols-[104px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
+                  <span className="font-mono text-xs text-foreground truncate sm:whitespace-normal sm:break-all">{item.code}</span>
+                  <span className="text-foreground truncate sm:whitespace-normal sm:break-words">{item.name}</span>
+                  <span className="text-xs text-muted-foreground truncate sm:hidden">
                     {[item.fund_detail?.name, item.class_type_detail?.name].filter(Boolean).join(" / ") || "—"}
                   </span>
-                  <span className="text-xs text-muted-foreground truncate">
+                  <span className="text-xs text-muted-foreground truncate sm:hidden">
                     {FUND_CLUSTER_OPTIONS.find((o) => o.value === item.fund_cluster)?.label || "—"}
                   </span>
                   <div className="flex gap-1 justify-end">
-                    <button onClick={() => openEdit(item)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                    <button onClick={() => openEdit(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => handleDelete(item)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                    <button onClick={() => handleDelete(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -939,7 +941,7 @@ function ObjectCodeTable() {
             className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <div className="flex gap-2 ml-auto">
+        <div className="flex gap-2 ml-auto slg:ml-0">
           <Button size="sm" variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
             <Upload className="w-3.5 h-3.5 mr-1" /> Bulk Import
           </Button>
@@ -954,7 +956,7 @@ function ObjectCodeTable() {
 
       {loading ? <TableSkeleton rows={4} /> : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[160px_1fr_70px] gap-3 px-4 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[160px_1fr_70px] sm:grid-cols-[104px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Object Code</span>
             <span>Description</span>
             <span />
@@ -964,14 +966,14 @@ function ObjectCodeTable() {
               <div className="px-4 py-6 text-sm text-muted-foreground text-center">No entries.</div>
             ) : (
               filtered.map((item) => (
-                <div key={item.id} className="grid grid-cols-[160px_1fr_70px] gap-3 px-4 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
-                  <span className="font-mono text-xs text-foreground truncate">{item.code}</span>
+                <div key={item.id} className="grid grid-cols-[160px_1fr_70px] sm:grid-cols-[104px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
+                  <span className="font-mono text-xs text-foreground truncate sm:whitespace-normal sm:break-all">{item.code}</span>
                   <span className="text-foreground truncate">{item.description}</span>
                   <div className="flex gap-1 justify-end">
-                    <button onClick={() => openEdit(item)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                    <button onClick={() => openEdit(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => handleDelete(item)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                    <button onClick={() => handleDelete(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1111,7 +1113,7 @@ function ClassTypeTable() {
             className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <div className="flex gap-2 ml-auto">
+        <div className="flex gap-2 ml-auto slg:ml-0">
           <Button size="sm" variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
             <Upload className="w-3.5 h-3.5 mr-1" /> Bulk Import
           </Button>
@@ -1126,10 +1128,10 @@ function ClassTypeTable() {
 
       {loading ? <TableSkeleton rows={4} /> : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[140px_1fr_140px_70px] gap-3 px-4 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[140px_1fr_140px_70px] sm:grid-cols-[96px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Code</span>
             <span>Name</span>
-            <span>Money Range</span>
+            <span className="sm:hidden">Money Range</span>
             <span />
           </div>
           <div className="max-h-[360px] overflow-y-auto">
@@ -1137,10 +1139,10 @@ function ClassTypeTable() {
               <div className="px-4 py-6 text-sm text-muted-foreground text-center">No entries.</div>
             ) : (
               filtered.map((item) => (
-                <div key={item.id} className="grid grid-cols-[140px_1fr_140px_70px] gap-3 px-4 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
-                  <span className="font-mono text-xs text-foreground truncate">{item.code}</span>
-                  <span className="text-foreground truncate">{item.name}</span>
-                  <span className="text-xs text-muted-foreground truncate">
+                <div key={item.id} className="grid grid-cols-[140px_1fr_140px_70px] sm:grid-cols-[96px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
+                  <span className="font-mono text-xs text-foreground truncate sm:whitespace-normal sm:break-all">{item.code}</span>
+                  <span className="text-foreground truncate sm:whitespace-normal sm:break-words">{item.name}</span>
+                  <span className="text-xs text-muted-foreground truncate sm:hidden">
                     {item.money_range_min != null && item.money_range_max != null
                       ? `${Number(item.money_range_min).toLocaleString()} - ${Number(item.money_range_max).toLocaleString()}`
                       : item.money_range_min != null
@@ -1150,10 +1152,10 @@ function ClassTypeTable() {
                           : "—"}
                   </span>
                   <div className="flex gap-1 justify-end">
-                    <button onClick={() => openEdit(item)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                    <button onClick={() => openEdit(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => handleDelete(item)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                    <button onClick={() => handleDelete(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1298,7 +1300,7 @@ function FundSourceTable() {
             className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
           />
         </div>
-        <div className="flex gap-2 ml-auto">
+        <div className="flex gap-2 ml-auto slg:ml-0">
           <Button size="sm" variant="outline" className="text-foreground" onClick={() => setImportOpen(true)}>
             <Upload className="w-3.5 h-3.5 mr-1" /> Bulk Import
           </Button>
@@ -1313,10 +1315,10 @@ function FundSourceTable() {
 
       {loading ? <TableSkeleton rows={4} /> : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[140px_1fr_140px_70px] gap-3 px-4 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[140px_1fr_140px_70px] sm:grid-cols-[96px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <span>Code</span>
             <span>Name</span>
-            <span>SAGF</span>
+            <span className="sm:hidden">SAGF</span>
             <span />
           </div>
           <div className="max-h-[360px] overflow-y-auto">
@@ -1324,17 +1326,17 @@ function FundSourceTable() {
               <div className="px-4 py-6 text-sm text-muted-foreground text-center">No entries.</div>
             ) : (
               filtered.map((item) => (
-                <div key={item.id} className="grid grid-cols-[140px_1fr_140px_70px] gap-3 px-4 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
-                  <span className="font-mono text-xs text-foreground truncate">{item.code}</span>
-                  <span className="text-foreground truncate">{item.name}</span>
-                  <span className="text-xs text-muted-foreground truncate">
+                <div key={item.id} className="grid grid-cols-[140px_1fr_140px_70px] sm:grid-cols-[96px_1fr_60px] gap-3 px-4 sm:gap-2 sm:px-3 py-2.5 border-b border-border last:border-0 items-center text-sm hover:bg-accent/30 transition-colors">
+                  <span className="font-mono text-xs text-foreground truncate sm:whitespace-normal sm:break-all">{item.code}</span>
+                  <span className="text-foreground truncate sm:whitespace-normal sm:break-words">{item.name}</span>
+                  <span className="text-xs text-muted-foreground truncate sm:hidden">
                     {item.is_sagf ? (item.sagf_type ? `Yes (${item.sagf_type})` : "Yes") : "No"}
                   </span>
                   <div className="flex gap-1 justify-end">
-                    <button onClick={() => openEdit(item)} className="p-1 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                    <button onClick={() => openEdit(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => handleDelete(item)} className="p-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                    <button onClick={() => handleDelete(item)} className="p-1 sm:p-2 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>

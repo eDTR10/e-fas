@@ -55,8 +55,8 @@ const DocumentPage = () => {
     <AdminLayout title="Documents" subtitle="Manage all documents">
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -82,7 +82,7 @@ const DocumentPage = () => {
             </button>
           ))}
         </div>
-        <button className="flex items-center gap-2 bg-primary text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition ml-auto sm:ml-0">
+        <button className="flex items-center gap-2 bg-primary text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition ml-auto slg:ml-0">
           <Plus className="w-4 h-4" />
           New Doc
         </button>
@@ -129,7 +129,7 @@ const DocumentPage = () => {
                 </span>
 
                 {/* Actions */}
-                <button className="p-1.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
+                <button className="p-1.5 sm:p-2.5 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
               </div>

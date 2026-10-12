@@ -161,8 +161,8 @@ const AuditTrailPage = () => {
 
   return (
     <AdminLayout title="Audit Trail" subtitle="System-wide log of create, update, and delete actions">
-      <div className="flex items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
-        <div className="relative flex-1 max-w-xs sm:max-w-full">
+      <div className="flex flex-wrap items-center gap-3 mb-5 sm:flex-col sm:items-stretch">
+        <div className="relative flex-1 min-w-[190px] max-w-xs sm:max-w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -193,10 +193,10 @@ const AuditTrailPage = () => {
       </div>
 
       <KpiStrip cards={[
-        { title: "Total Actions", value: String(filtered.length), icon: ClipboardList },
-        { title: "Created", value: String(filtered.filter((l) => l.action === "CREATE").length), icon: FilePlus },
-        { title: "Updated", value: String(filtered.filter((l) => l.action === "UPDATE").length), icon: FileEdit },
-        { title: "Deleted", value: String(filtered.filter((l) => l.action === "DELETE").length), icon: FileX },
+        { title: "Total Actions", subtitle: "Audit log entries (not from a sheet)", value: String(filtered.length), icon: ClipboardList },
+        { title: "Created", subtitle: "Action = CREATE", value: String(filtered.filter((l) => l.action === "CREATE").length), icon: FilePlus },
+        { title: "Updated", subtitle: "Action = UPDATE", value: String(filtered.filter((l) => l.action === "UPDATE").length), icon: FileEdit },
+        { title: "Deleted", subtitle: "Action = DELETE", value: String(filtered.filter((l) => l.action === "DELETE").length), icon: FileX },
       ]} />
 
       {loading ? (
@@ -204,7 +204,7 @@ const AuditTrailPage = () => {
       ) : (
         <div>
           <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="grid grid-cols-[90px_1fr_1.4fr_1fr_1fr] gap-4 px-5 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[90px_1fr_1.4fr]">
+            <div className="grid grid-cols-[90px_1fr_1.4fr_1fr_1fr] gap-4 px-5 sm:gap-2 sm:px-3 py-3 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wide slg:grid-cols-[90px_1fr_1.4fr]">
               <SortFilterHeader label="Action" sortKey="action" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
                 filterValue={columnFilters.action || ""} onFilterChange={(v) => setColumnFilter("action", v)} filterPlaceholder="Filter…" />
               <SortFilterHeader label="Model" sortKey="model_name" activeKey={sortKey} direction={sortDir} onSort={toggleSort}
@@ -228,7 +228,7 @@ const AuditTrailPage = () => {
                 <div
                   key={l.id}
                   onClick={() => setViewing(l)}
-                  className="grid grid-cols-[90px_1fr_1.4fr_1fr_1fr] gap-4 px-5 py-3.5 border-b border-border last:border-0 items-center hover:bg-accent/40 transition-colors slg:grid-cols-[90px_1fr_1.4fr] cursor-pointer"
+                  className="grid grid-cols-[90px_1fr_1.4fr_1fr_1fr] gap-4 px-5 sm:gap-2 sm:px-3 py-3.5 border-b border-border last:border-0 items-center hover:bg-accent/40 transition-colors slg:grid-cols-[90px_1fr_1.4fr] cursor-pointer"
                 >
                   <Badge variant={ACTION_BADGE[l.action]}>{l.action}</Badge>
                   <div className="min-w-0"><CategoryChip label={modelLabel(l.model_name)} /></div>

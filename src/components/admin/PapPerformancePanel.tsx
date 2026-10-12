@@ -81,6 +81,12 @@ function PapPerformanceDialog({
               <p className="text-base font-semibold text-foreground">{row.utilizationRate.toFixed(1)}%</p>
             </div>
           </div>
+          {row.obligated === 0 && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              No RAOD row carries PAP code {row.code}, so its obligation counts as 0. If obligations for this PAP were recorded in the
+              RAOD sheet under a different PAP CODE, correct the code in one of the two sheets so they match.
+            </p>
+          )}
 
           <div>
             <p className="text-xs font-semibold text-foreground mb-2">Linked SARO Records</p>
@@ -161,6 +167,9 @@ export default function PapPerformancePanel({
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-foreground">PAP / Project Performance</h3>
           <p className="text-[11px] text-muted-foreground">Click a PAP to view detailed allotment activity</p>
+          <p className="text-[10px] text-muted-foreground/70">
+            Total Released: Received SARO sheet "AMOUNT", summed per "PAP CODE" · Utilization Rate: RAOD sheet "OBLIGATED AMOUNT" per "PAP CODE" ÷ Total Released. PAPs are matched by exact PAP code.
+          </p>
         </div>
       </div>
 
@@ -194,7 +203,10 @@ export default function PapPerformancePanel({
                   <span className="w-5 h-5 rounded bg-primary/15 text-primary text-[11px] font-semibold flex items-center justify-center shrink-0">
                     {r.rank}
                   </span>
-                  <span className="text-sm font-medium text-foreground truncate" title={r.name}>{r.name}</span>
+                  <div className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground truncate" title={r.name}>{r.name}</span>
+                    <span className="block text-[10px] text-muted-foreground">PAP {r.code}</span>
+                  </div>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Total Released</p>
@@ -203,7 +215,13 @@ export default function PapPerformancePanel({
               </div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">Utilization Rate</span>
-                <span className="text-[10px] font-semibold text-foreground">{r.utilizationRate.toFixed(1)}%</span>
+                {r.obligated > 0 ? (
+                  <span className="text-[10px] font-semibold text-foreground">{r.utilizationRate.toFixed(1)}%</span>
+                ) : (
+                  <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400" title="No RAOD row carries this exact PAP code, so nothing is counted as obligated for it.">
+                    No RAOD obligation under this PAP code
+                  </span>
+                )}
               </div>
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(100, r.utilizationRate)}%` }} />

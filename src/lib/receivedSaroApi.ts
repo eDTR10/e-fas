@@ -17,6 +17,9 @@ export interface ReceivedSAROLineItem {
 export interface ReceivedSARO {
   id: number;
   saro_no: string;
+  // Which year's sheet this record belongs to — the same Allotment No. can
+  // exist once per year (e.g. a 2025 SARO carried over into 2026).
+  year: number | null;
   region: string;
   date_received: string;
   date_of_saro: string | null;
@@ -37,7 +40,7 @@ export interface ReceivedSARO {
 
 export type ReceivedSAROPayload = Omit<
   ReceivedSARO,
-  "id" | "fund_source" | "is_archived" | "created_at" | "updated_at"
+  "id" | "year" | "fund_source" | "is_archived" | "created_at" | "updated_at"
 >;
 
 // The bulk_import endpoint returns raw (unserialized) Decimal/date values —

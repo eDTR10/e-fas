@@ -140,10 +140,11 @@ export const raodApi = {
     return data;
   },
 
-  confirmImport: async (rows: RaodImportRow[]): Promise<RaodImportResult> => {
+  confirmImport: async (rows: RaodImportRow[], upsert = false): Promise<RaodImportResult> => {
     const { data } = await api.post<RaodImportResult>(`${BASE}/bulk_import/`, {
       rows,
       dry_run: "false",
+      ...(upsert ? { upsert: "true" } : {}),
     });
     return data;
   },

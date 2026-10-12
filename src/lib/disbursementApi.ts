@@ -94,10 +94,11 @@ export const disbursementApi = {
     return data;
   },
 
-  confirmImport: async (rows: DisbursementImportRow[]): Promise<DisbursementImportResult> => {
+  confirmImport: async (rows: DisbursementImportRow[], upsert = false): Promise<DisbursementImportResult> => {
     const { data } = await api.post<DisbursementImportResult>(`${BASE}/bulk_import/`, {
       rows,
       dry_run: "false",
+      ...(upsert ? { upsert: "true" } : {}),
     });
     return data;
   },
