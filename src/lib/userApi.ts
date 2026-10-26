@@ -2,9 +2,10 @@ import api from "../screens/Auth/authService";
 
 const BASE = "/api/v1/users/manage";
 
-export type UserRole = "admin" | "budget" | "accounting" | "cashier" | "provincial_officer" | "user";
+export type UserRole = "super_admin" | "admin" | "budget" | "accounting" | "cashier" | "provincial_officer" | "user";
 
 export const USER_ROLE_OPTIONS: { value: UserRole; label: string }[] = [
+  { value: "super_admin", label: "Super Admin" },
   { value: "admin", label: "Admin" },
   { value: "budget", label: "Budget" },
   { value: "accounting", label: "Accounting" },
@@ -23,7 +24,7 @@ export interface UserAccount {
   projects: number[];
   acc_lvl: number;
   is_active: boolean;
-  // Kept in sync server-side with role==='admin' — not independently editable.
+  // Kept in sync server-side with the admin roles (admin / super_admin) — not independently editable.
   is_staff: boolean;
   role: UserRole;
 }

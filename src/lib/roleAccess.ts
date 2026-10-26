@@ -3,13 +3,17 @@
 // here for any role that's meant to see it.
 //
 // Roles come from the backend's UserAccount.role field (accounts app):
-// admin / budget / accounting / cashier / provincial_officer / user.
+// super_admin / admin / budget / accounting / cashier / provincial_officer / user.
+//
+// A Super Admin sees everything an Admin does, and is the only one who can open User Management
+// (see ROLE_DENIED_PATHS).
 //
 // A role mapped to "all" (or missing from ROLE_ALLOWED_PATHS entirely) sees
 // the full admin area unchanged — this keeps admin, provincial_officer, and
 // plain "user" accounts working exactly as before, since only budget,
 // accounting, and cashier have a defined restricted menu today.
 export const ROLE_ALLOWED_PATHS: Record<string, string[] | "all"> = {
+  super_admin: "all",
   admin: "all",
 
   budget: [
@@ -53,11 +57,20 @@ export const ROLE_ALLOWED_PATHS: Record<string, string[] | "all"> = {
 // it's allowed to see; a group not listed here is dropped entirely for that
 // role even if one of its items' paths happens to be in ROLE_ALLOWED_PATHS.
 export const ROLE_ALLOWED_GROUPS: Record<string, string[] | "all"> = {
+  super_admin: "all",
   admin: "all",
   budget: ["Budget", "Other Settings"],
   accounting: ["Accounting", "Other Settings"],
   cashier: ["Cashier", "Report", "Other Settings"],
 };
+
+// Pages a role is kept out of even though it otherwise sees "all": an Admin cannot open User Management —
+// only a Super Admin can.
+export const ROLE_DENIED_PATHS: Record<string, string[]> = {
+  admin: ["/admin/other-settings/user-management"],
+};
+
+export const getDeniedPaths = (role?: string | null): string[] => (role ? ROLE_DENIED_PATHS[role] ?? [] : []);
 
 export const getAllowedPaths = (role?: string | null): string[] | "all" => {
   if (!role) return "all";
@@ -70,6 +83,7 @@ export const getAllowedGroups = (role?: string | null): string[] | "all" => {
 };
 
 export const isPathAllowedForRole = (role: string | undefined | null, pathname: string): boolean => {
+  if (getDeniedPaths(role).includes(pathname)) return false;
   const allowed = getAllowedPaths(role);
   if (allowed === "all") return true;
   return allowed.includes(pathname);

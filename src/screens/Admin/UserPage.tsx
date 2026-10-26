@@ -35,6 +35,7 @@ const roleLabel = (role: UserRole): string => USER_ROLE_OPTIONS.find((o) => o.va
 // Fixed (not hashed) so each role always reads the same color everywhere —
 // unlike free-text categorical fields, the role set is small and closed.
 const ROLE_BADGE_VARIANT: Record<UserRole, "success" | "blue" | "purple" | "teal" | "orange" | "secondary"> = {
+  super_admin: "success",
   admin: "success",
   budget: "blue",
   accounting: "purple",
@@ -192,7 +193,7 @@ function UserFormDialog({
             ))}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Note: choosing role "Admin" automatically grants staff/admin access; any other role removes it.
+            Note: choosing role "Admin" or "Super Admin" automatically grants staff/admin access; any other role removes it. Only a Super Admin can open User Management.
           </p>
         </div>
 
@@ -363,7 +364,7 @@ const UserPage = () => {
         { title: "Total Users", subtitle: "User accounts (not from a sheet)", value: String(filtered.length), icon: Users },
         { title: "Active", subtitle: "Account status = active", value: String(filtered.filter((u) => u.is_active).length), icon: ShieldCheck },
         { title: "Inactive", subtitle: "Account status = inactive", value: String(filtered.filter((u) => !u.is_active).length), icon: UserX },
-        { title: "Admins", subtitle: "Role = admin", value: String(filtered.filter((u) => u.role === "admin").length), icon: Building2 },
+        { title: "Admins", subtitle: "Role = admin / super admin", value: String(filtered.filter((u) => u.role === "admin" || u.role === "super_admin").length), icon: Building2 },
       ]} />
 
       <BulkActionBar count={selected.size} itemLabel="user" onDelete={handleBulkDelete} onClear={clearSelection} />

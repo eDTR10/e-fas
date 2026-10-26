@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { ModeToggle } from "../../components/mode-toggle";
 import { useAuth } from "../Auth/AuthContext";
-import { getAllowedPaths, getAllowedGroups } from "../../lib/roleAccess";
+import { getAllowedPaths, getAllowedGroups, getDeniedPaths } from "../../lib/roleAccess";
 import efasLogo from "../../assets/eFAS_Logo.png";
 
 type NavLinkItem = { to: string; label: string; icon: React.ElementType };
@@ -104,10 +104,15 @@ const AdminLayout = ({ title, subtitle, children }: AdminLayoutProps) => {
 
   const allowedPaths = getAllowedPaths(user?.role);
   const allowedGroups = getAllowedGroups(user?.role);
+  // Pages this role may never open (User Management for an Admin) come out of the menu whatever else it allows.
+  const deniedPaths = getDeniedPaths(user?.role);
+  const baseNav: NavEntry[] = deniedPaths.length === 0 ? NAV_STRUCTURE : NAV_STRUCTURE
+    .map((entry): NavEntry => entry.type === "group" ? { type: "group", group: { ...entry.group, items: entry.group.items.filter(it => !deniedPaths.includes(it.to)) } } : entry)
+    .filter(entry => entry.type !== "standalone" || !deniedPaths.includes(entry.item.to));
   const visibleNav: NavEntry[] =
     allowedPaths === "all"
-      ? NAV_STRUCTURE
-      : NAV_STRUCTURE.reduce<NavEntry[]>((acc, entry) => {
+      ? baseNav
+      : baseNav.reduce<NavEntry[]>((acc, entry) => {
           if (entry.type === "divider") {
             acc.push(entry);
             return acc;
