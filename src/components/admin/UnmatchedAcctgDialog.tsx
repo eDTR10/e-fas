@@ -34,7 +34,7 @@ export function UnmatchedAcctgDialog({ open, onOpenChange }: UnmatchedAcctgDialo
     const q = search.trim().toLowerCase();
     if (!q) return entries;
     return entries.filter(
-      (e) => e.dv_number.toLowerCase().includes(q) || e.ors_no.toLowerCase().includes(q)
+      (e) => e.dv_number.toLowerCase().includes(q) || e.ors_no.toLowerCase().includes(q) || (e.saro_no || "").toLowerCase().includes(q)
     );
   }, [entries, search]);
 
@@ -42,7 +42,7 @@ export function UnmatchedAcctgDialog({ open, onOpenChange }: UnmatchedAcctgDialo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader className="border-b border-border">
           <DialogTitle>DVs Not Yet in Tracker</DialogTitle>
         </DialogHeader>
@@ -58,7 +58,7 @@ export function UnmatchedAcctgDialog({ open, onOpenChange }: UnmatchedAcctgDialo
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search DV no. or ORS no..."
+              placeholder="Search DV no., ORS no. or SARO no..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition"
@@ -73,15 +73,17 @@ export function UnmatchedAcctgDialog({ open, onOpenChange }: UnmatchedAcctgDialo
             </p>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden max-h-[55vh] overflow-y-auto">
-              <div className="grid grid-cols-[1fr_1fr_140px] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
+              <div className="grid grid-cols-[1fr_1fr_1fr_140px] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
                 <span>DV No.</span>
                 <span>ORS No.</span>
+                <span>SARO No.</span>
                 <span className="text-right">Net Amount</span>
               </div>
               {filtered.map((e) => (
-                <div key={e.id} className="grid grid-cols-[1fr_1fr_140px] gap-3 px-3 py-2 border-b border-border last:border-0 items-center text-sm">
+                <div key={e.id} className="grid grid-cols-[1fr_1fr_1fr_140px] gap-3 px-3 py-2 border-b border-border last:border-0 items-center text-sm">
                   <span className="text-foreground truncate">{e.dv_number}</span>
-                  <span className="text-foreground truncate">{e.ors_no}</span>
+                  <span className="text-foreground truncate" title={e.ors_no}>{e.ors_no}</span>
+                  <span className="text-foreground truncate">{e.saro_no || "—"}</span>
                   <span className="text-right text-foreground tabular-nums">{formatMoney(e.net)}</span>
                 </div>
               ))}

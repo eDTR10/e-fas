@@ -103,6 +103,30 @@ export interface NtcaBalanceReport {
   };
 }
 
+export interface DisbursementBreakdownItem {
+  source: string;
+  dv_number: string;
+  ors_no: string;
+  net: string | null;
+  date: string | null;
+  basis: string;
+  year: number | null;
+  quarter: number | null;
+  counted: boolean;
+  reason: string;
+}
+
+// The rows behind one SARO's "Disbursed" figure; counted_total equals that figure.
+export interface DisbursementBreakdown {
+  saro_no: string;
+  year: number | null;
+  items: DisbursementBreakdownItem[];
+  quarters: [string, string, string, string];
+  counted_total: string;
+  counted_rows: number;
+  left_out_rows: number;
+}
+
 export const ntcaBalanceApi = {
   list: async (): Promise<NtcaBalanceCategory[]> => {
     const { data } = await api.get<NtcaBalanceCategory[]>(`${BASE}/`);
@@ -152,6 +176,13 @@ export const ntcaBalanceApi = {
   report: async (year: number | "all", fundCluster: NtcaBalanceFundCluster): Promise<NtcaBalanceReport> => {
     const { data } = await api.get<NtcaBalanceReport>(`${BASE}/report/`, {
       params: { year, fund_cluster: fundCluster },
+    });
+    return data;
+  },
+
+  disbursementBreakdown: async (saroNo: string, year: number | "all"): Promise<DisbursementBreakdown> => {
+    const { data } = await api.get<DisbursementBreakdown>(`${BASE}/disbursement_breakdown/`, {
+      params: { saro_no: saroNo, year },
     });
     return data;
   },

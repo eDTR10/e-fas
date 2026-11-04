@@ -10,6 +10,8 @@ export interface UnmatchedAcctgEntry {
   id: number;
   dv_number: string;
   ors_no: string;
+  // The SARO this ORS No. resolves to through RAOD ("" if none) — the key the NTCA Balance report groups by.
+  saro_no: string;
   net: string;
   synced_at: string;
 }

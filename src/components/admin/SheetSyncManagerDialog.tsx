@@ -488,6 +488,19 @@ export function SheetSyncManagerDialog({
     if (supportsSyncPreview(table) && sources.length > 0) {
       try {
         const result = await sheetSyncApi.preview(table);
+        if (!Array.isArray(result.rows)) {
+          // An older backend ignores dry_run and runs the whole sync straight away,
+          // returning counts instead of rows. Say so rather than failing to render.
+          const done = (result as unknown as { result?: { created?: number; updated?: number } }).result;
+          setError(
+            "This server doesn't have the sync preview yet, so the sync ran immediately instead" +
+            (done ? ` (${done.created ?? 0} created, ${done.updated ?? 0} updated)` : "") +
+            ". Update and restart the backend to get the review step."
+          );
+          await loadPrimary();
+          onSynced?.();
+          return;
+        }
         setPreview(result);
         setIncluded(new Set(
           result.rows

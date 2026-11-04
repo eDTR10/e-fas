@@ -1,4 +1,5 @@
 import { labelPapOptions } from "../../lib/papLabel";
+import { DisbursementBreakdownDialog } from "../../components/admin/DisbursementBreakdownDialog";
 import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -439,6 +440,8 @@ const NtcaBalancePage = () => {
   const [saroFormCategoryName, setSaroFormCategoryName] = useState<string | undefined>(undefined);
   const [editingSaro, setEditingSaro] = useState<NtcaBalanceSaroReport | null>(null);
   const [overviewOpen, setOverviewOpen] = useState(false);
+  // SARO whose Disbursed figure is being broken down (click the number).
+  const [breakdownSaro, setBreakdownSaro] = useState<string | null>(null);
 
   // ── Search + Category/PAP/SARO filters — client-side, over whatever the
   // current Year/Fund Cluster tab already loaded (mirrors the Dashboard's
@@ -797,7 +800,9 @@ const NtcaBalancePage = () => {
                           </div>
                           <div className="mt-1.5 grid grid-cols-3 gap-2">
                             {totalCell("Received", sa.received_total)}
-                            {totalCell("Disbursed", sa.disbursed_total)}
+                            <button type="button" onClick={() => setBreakdownSaro(sa.saro_no)} className="min-w-0 text-left underline decoration-dotted underline-offset-2" title="See what makes up this figure">
+                              {totalCell("Disbursed", sa.disbursed_total)}
+                            </button>
                             {totalCell("Balance", sa.balance_total, true)}
                           </div>
                           {quarterTable(sa.received_quarters, sa.disbursed_quarters, sa.balance_quarters)}
@@ -934,7 +939,7 @@ const NtcaBalancePage = () => {
                       {pickQuarters(s.disbursed_quarters).map((v, i) => (
                         <span key={i} className="text-foreground text-right">{formatMoney(v)}</span>
                       ))}
-                      <span className="text-foreground font-medium text-right">{formatMoney(s.disbursed_total)}</span>
+                      <button type="button" onClick={() => setBreakdownSaro(s.saro_no)} className="text-foreground font-medium text-right underline decoration-dotted underline-offset-2 hover:text-primary" title="See what makes up this figure">{formatMoney(s.disbursed_total)}</button>
                       {pickQuarters(s.balance_quarters).map((v, i) => (
                         <span key={i} className={`text-right ${Number(v) < 0 ? "text-destructive" : "text-foreground"}`}>{formatMoney(v)}</span>
                       ))}
@@ -978,6 +983,7 @@ const NtcaBalancePage = () => {
         open={saroFormOpen} onOpenChange={setSaroFormOpen} categoryId={saroFormCategoryId} categoryName={saroFormCategoryName}
         editing={editingSaro} saroList={saroList} fundCluster={fundCluster} onSaved={load}
       />
+      <DisbursementBreakdownDialog saroNo={breakdownSaro} year={year} onOpenChange={(open) => !open && setBreakdownSaro(null)} />
       <CategoryTaggingOverviewDialog
         open={overviewOpen} onOpenChange={setOverviewOpen}
         categories={filteredCategories}
