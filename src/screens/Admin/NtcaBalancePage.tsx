@@ -357,7 +357,7 @@ function CategoryTaggingOverviewDialog({
   onOpenChange: (open: boolean) => void;
   categories: NtcaBalanceCategoryReport[];
   clusterLabel: string;
-  year: number;
+  year: number | "all";
   // Opens the existing SaroFormDialog (rendered at the page level) for this
   // category — stacks on top rather than closing this modal, so saving
   // lands back here with the list already refreshed.
@@ -368,7 +368,7 @@ function CategoryTaggingOverviewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader className="border-b border-border">
-          <DialogTitle>Category &amp; SARO Tagging — {clusterLabel} {year}</DialogTitle>
+          <DialogTitle>Category &amp; SARO Tagging — {clusterLabel} {year === "all" ? "(all years)" : year}</DialogTitle>
         </DialogHeader>
         <div className="px-4 py-4 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
           {categories.length === 0 ? (
@@ -426,7 +426,7 @@ function CategoryTaggingOverviewDialog({
 // ─────────────────────────────────────────────────────────────────────────
 const NtcaBalancePage = () => {
   const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
+  const [year, setYear] = useState<number | "all">(currentYear);
   const [fundCluster, setFundCluster] = useState<NtcaBalanceFundCluster>("mds_regular");
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState<NtcaBalanceReport | null>(null);
@@ -648,9 +648,10 @@ const NtcaBalancePage = () => {
         </div>
         <select
           value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
+          onChange={(e) => setYear(e.target.value === "all" ? "all" : Number(e.target.value))}
           className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
         >
+          <option value="all">All years</option>
           {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
         <QuarterDropdown visibleQuarters={visibleQuarters} onToggle={toggleQuarter} onSelectAll={() => setVisibleQuarters(new Set([0, 1, 2, 3]))} />
@@ -715,7 +716,7 @@ const NtcaBalancePage = () => {
         <TableSkeleton rows={8} />
       ) : !report || report.categories.length === 0 ? (
         <div className="bg-card border border-border rounded-xl px-5 py-10 text-center text-sm text-muted-foreground">
-          No categories with data in {FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label} for {year} yet.
+          No categories with data in {FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label} for {year === "all" ? "any year" : year} yet.
           Click "Add Category" to create one, then tag its SARO No.(s).
         </div>
       ) : filteredCategories.length === 0 ? (

@@ -90,7 +90,7 @@ export interface NtcaBalanceCategoryReport {
 }
 
 export interface NtcaBalanceReport {
-  year: number;
+  year: number | null; // null = all years
   fund_cluster: NtcaBalanceFundCluster;
   categories: NtcaBalanceCategoryReport[];
   totals: {
@@ -149,7 +149,7 @@ export const ntcaBalanceApi = {
     return data;
   },
 
-  report: async (year: number, fundCluster: NtcaBalanceFundCluster): Promise<NtcaBalanceReport> => {
+  report: async (year: number | "all", fundCluster: NtcaBalanceFundCluster): Promise<NtcaBalanceReport> => {
     const { data } = await api.get<NtcaBalanceReport>(`${BASE}/report/`, {
       params: { year, fund_cluster: fundCluster },
     });
