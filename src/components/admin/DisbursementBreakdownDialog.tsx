@@ -61,9 +61,10 @@ export function DisbursementBreakdownDialog({
           {data && (
             <>
               <p className="text-xs text-muted-foreground">
-                Disbursed is the <b className="text-foreground">Net</b> amount of each DV. A DV goes into the quarter of its
-                <b className="text-foreground"> Date Paid</b>; if that is empty, its Date processed; if that is empty too, the
-                year-month inside its DV Number.
+                Disbursed is the <b className="text-foreground">Net Amount</b> of each row in the Acctg sheet, under the row's
+                <b className="text-foreground"> SARO No.</b> and in the quarter of its <b className="text-foreground">Date</b> —
+                the same formula as the spreadsheet. Only a row without those (or a Net not from the Acctg sheet) falls back
+                to Date Paid, Date processed, then the year-month inside the DV Number.
               </p>
 
               <div className="grid grid-cols-5 gap-2 sm:grid-cols-2">

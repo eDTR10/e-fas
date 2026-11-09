@@ -73,17 +73,19 @@ export function UnmatchedAcctgDialog({ open, onOpenChange }: UnmatchedAcctgDialo
             </p>
           ) : (
             <div className="border border-border rounded-lg overflow-hidden max-h-[55vh] overflow-y-auto">
-              <div className="grid grid-cols-[1fr_1fr_1fr_140px] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
+              <div className="grid grid-cols-[1fr_1fr_1fr_100px_140px] gap-3 px-3 py-2 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sticky top-0">
                 <span>DV No.</span>
                 <span>ORS No.</span>
                 <span>SARO No.</span>
+                <span>Date</span>
                 <span className="text-right">Net Amount</span>
               </div>
               {filtered.map((e) => (
-                <div key={e.id} className="grid grid-cols-[1fr_1fr_1fr_140px] gap-3 px-3 py-2 border-b border-border last:border-0 items-center text-sm">
+                <div key={e.id} className="grid grid-cols-[1fr_1fr_1fr_100px_140px] gap-3 px-3 py-2 border-b border-border last:border-0 items-center text-sm">
                   <span className="text-foreground truncate">{e.dv_number}</span>
                   <span className="text-foreground truncate" title={e.ors_no}>{e.ors_no}</span>
                   <span className="text-foreground truncate">{e.saro_no || "—"}</span>
+                  <span className="text-foreground tabular-nums">{e.date || "—"}</span>
                   <span className="text-right text-foreground tabular-nums">{formatMoney(e.net)}</span>
                 </div>
               ))}
