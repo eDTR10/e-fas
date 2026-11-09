@@ -127,6 +127,23 @@ export interface DisbursementBreakdown {
   left_out_rows: number;
 }
 
+export interface BulkTagItem {
+  saro_no: string;
+  pap: string;
+  category_id: number | null;
+  category: string;
+  // new = will be tagged · already_tagged = left as is · unmatched = PAP unclear, pick a category
+  status: "new" | "already_tagged" | "unmatched";
+  reason: string;
+}
+
+export interface BulkTagResult {
+  dry_run: boolean;
+  created: number;
+  items: BulkTagItem[];
+  categories: { id: number; name: string }[];
+}
+
 export const ntcaBalanceApi = {
   list: async (): Promise<NtcaBalanceCategory[]> => {
     const { data } = await api.get<NtcaBalanceCategory[]>(`${BASE}/`);
@@ -183,6 +200,20 @@ export const ntcaBalanceApi = {
   disbursementBreakdown: async (saroNo: string, year: number | "all"): Promise<DisbursementBreakdown> => {
     const { data } = await api.get<DisbursementBreakdown>(`${BASE}/disbursement_breakdown/`, {
       params: { saro_no: saroNo, year },
+    });
+    return data;
+  },
+
+  // Paste a list of SARO Nos. and tag them in one go — into `categoryId`, or (omitted)
+  // each into the category its PAP already belongs to. dryRun previews without saving.
+  bulkTagSaros: async (params: {
+    text: string; categoryId?: number | null; fundCluster: NtcaBalanceFundCluster; dryRun: boolean;
+  }): Promise<BulkTagResult> => {
+    const { data } = await api.post<BulkTagResult>(`${BASE}/bulk_tag_saros/`, {
+      text: params.text,
+      category_id: params.categoryId || undefined,
+      fund_cluster: params.fundCluster === "unclassified" ? "" : params.fundCluster,
+      dry_run: params.dryRun,
     });
     return data;
   },

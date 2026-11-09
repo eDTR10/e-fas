@@ -1,9 +1,10 @@
 import { labelPapOptions } from "../../lib/papLabel";
 import { DisbursementBreakdownDialog } from "../../components/admin/DisbursementBreakdownDialog";
+import { BulkTagSarosDialog } from "../../components/admin/BulkTagSarosDialog";
 import { isCancelledRequest, OPERATION_CANCELLED_MESSAGE } from "../../lib/operationProgress";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2, Search, ListTree,
+  ChevronDown, ChevronRight, AlertTriangle, Plus, Pencil, Trash2, Search, ListTree, ListPlus,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import AdminLayout from "./AdminLayout";
@@ -442,6 +443,7 @@ const NtcaBalancePage = () => {
   const [overviewOpen, setOverviewOpen] = useState(false);
   // SARO whose Disbursed figure is being broken down (click the number).
   const [breakdownSaro, setBreakdownSaro] = useState<string | null>(null);
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
 
   // ── Search + Category/PAP/SARO filters — client-side, over whatever the
   // current Year/Fund Cluster tab already loaded (mirrors the Dashboard's
@@ -701,6 +703,9 @@ const NtcaBalancePage = () => {
           />
         </div>
         <div className="flex flex-wrap gap-2 ml-auto slg:ml-0">
+          <Button variant="outline" className="text-foreground" onClick={() => setBulkTagOpen(true)} title="Import SAROs" aria-label="Import SAROs">
+            <ListPlus className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">Import SAROs</span>
+          </Button>
           <Button variant="outline" className="text-foreground" onClick={() => setOverviewOpen(true)} title="View Tagging" aria-label="View Tagging">
             <ListTree className="w-4 h-4 mr-2 slg:mr-0" /> <span className="slg:hidden">View Tagging</span>
           </Button>
@@ -982,6 +987,11 @@ const NtcaBalancePage = () => {
       <SaroFormDialog
         open={saroFormOpen} onOpenChange={setSaroFormOpen} categoryId={saroFormCategoryId} categoryName={saroFormCategoryName}
         editing={editingSaro} saroList={saroList} fundCluster={fundCluster} onSaved={load}
+      />
+      <BulkTagSarosDialog
+        open={bulkTagOpen} onOpenChange={setBulkTagOpen} fundCluster={fundCluster}
+        clusterLabel={FUND_CLUSTER_TABS.find((t) => t.value === fundCluster)?.label ?? fundCluster}
+        onDone={load}
       />
       <DisbursementBreakdownDialog saroNo={breakdownSaro} year={year} onOpenChange={(open) => !open && setBreakdownSaro(null)} />
       <CategoryTaggingOverviewDialog
